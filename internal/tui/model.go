@@ -474,6 +474,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.spinnerActive {
 			m.spinnerFrame = (m.spinnerFrame + 1) % len(SpinnerFrames)
 			m.lastTick = time.Time(msg)
+			// The runtime label lives at the tail of the transcript now, so each
+			// frame has to repaint the viewport to animate.
+			m.repaintViewport()
 			return m, tea.Tick(120*time.Millisecond, func(t time.Time) tea.Msg { return spinnerTickMsg(t) })
 		}
 		return m, nil
@@ -1606,7 +1609,7 @@ func (m Model) View() string {
 	} else if m.autocomplete != nil {
 		parts = append(parts, m.renderAutocomplete())
 	}
-	parts = append(parts, m.renderRuntimeStatusBar(), m.renderStatusBar(), m.renderInput())
+	parts = append(parts, m.renderSessionBar(), m.renderInput(), m.renderUsageBar())
 	if panel := m.renderActivityPanel(); panel != "" {
 		parts = append(parts, panel)
 	}
@@ -1626,18 +1629,15 @@ func (m Model) renderScrollbar() string {
 	if height <= 0 {
 		return ""
 	}
-	trackStyle := lipgloss.NewStyle().Foreground(m.theme.Subtle)
-	thumbStyle := lipgloss.NewStyle().Foreground(m.theme.Claude)
+	// Nothing to scroll: drawing a full-height track puts a stray vertical line
+	// down the right edge of an otherwise empty screen.
 	if total <= visible {
-		var b strings.Builder
-		for i := 0; i < height; i++ {
-			b.WriteString(trackStyle.Render(" │"))
-			if i < height-1 {
-				b.WriteString("\n")
-			}
-		}
-		return b.String()
+		return ""
 	}
+	trackStyle := lipgloss.NewStyle().Foreground(m.theme.BorderSubtle)
+	thumbStyle := lipgloss.NewStyle().Foreground(m.theme.Border)
+	track := " " + glyphs.ScrollTrack
+	thumb := " " + glyphs.ScrollThumb
 	thumbHeight := max(1, visible*height/total)
 	maxThumbPos := total - visible
 	thumbPos := 0
@@ -1648,9 +1648,9 @@ func (m Model) renderScrollbar() string {
 	var b strings.Builder
 	for i := 0; i < height; i++ {
 		if i >= thumbPos && i < thumbPos+thumbHeight {
-			b.WriteString(thumbStyle.Render(" █"))
+			b.WriteString(thumbStyle.Render(thumb))
 		} else {
-			b.WriteString(trackStyle.Render(" │"))
+			b.WriteString(trackStyle.Render(track))
 		}
 		if i < height-1 {
 			b.WriteString("\n")
@@ -1680,103 +1680,134 @@ func (m Model) renderInput() string {
 	inputView := m.input.View()
 
 	// Determine border color — use accent when focused
-	borderColor := t.PromptBorder
+	borderColor := t.Border
 	if m.input.Focused() {
 		borderColor = t.Claude
 	}
 
-	// Input area with solid border, background, and padding
+	// Rounded to match message cards and dialogs. The usage meters used to live
+	// inside this box and crowded the typed text; they now own the row below.
 	inputStyle := lipgloss.NewStyle().
-		Border(lipgloss.NormalBorder()).
+		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
 		BorderTop(true).BorderBottom(true).BorderLeft(true).BorderRight(true).
 		Padding(0, 1).
 		Width(max(1, m.width-2)).
 		Background(t.Background)
 
-	// Compose the input without a prompt prefix.
-	line := inputView
-
-	// Right-side usage status, replacing the send/newline hint.
-	hintText := m.renderUsageStatus()
-	if hintText != "" {
-		hint := t.Dim.Render(hintText)
-		hintWidth := lipgloss.Width(hint)
-		contentWidth := m.width - 6 // accounting for border and padding
-
-		// Pad the line so the usage status can sit on the right.
-		lineWidth := lipgloss.Width(line)
-		gap := max(1, contentWidth-lineWidth-hintWidth)
-		line = line + strings.Repeat(" ", gap) + hint
-	}
-
-	return inputStyle.Render(line)
+	return inputStyle.Render(inputView)
 }
 
-func (m Model) renderRuntimeStatusBar() string {
+// renderSessionBar carries only slow-moving context: model, permission mode,
+// theme and working directory. The live Thinking/Ready label used to share this
+// row, but it now trails the conversation itself (see renderRuntimeLine).
+func (m Model) renderSessionBar() string {
 	t := m.theme
-	label := strings.TrimSpace(m.status)
-	if label == "" {
-		label = "Ready"
-	}
-	left := " "
-	if m.spinnerActive {
-		left += renderSpinnerLabel(t, m.spinnerFrame, label, m.loadingStart)
-	} else {
-		left += t.Assistant.Render(label)
-	}
-	if m.activeToolName != "" {
-		left += t.Dim.Render(" · ") + t.Tool.Render(m.activeToolName)
-	}
-	return t.Status.Width(m.width).Render(left)
-}
+	sep := t.Muted.Render(" " + glyphs.Separator + " ")
 
-func (m Model) renderStatusBar() string {
-	t := m.theme
 	modelName := strings.TrimSpace(m.currentModelName())
 	if modelName == "" {
 		modelName = "solcode"
 	}
-	left := " " + t.Assistant.Render(modelName)
+	left := " " + t.ClaudeStyle.Render(modelName)
+
 	rightParts := []string{}
 	if m.permissionMode != "" && m.permissionMode != "auto" {
-		rightParts = append(rightParts, t.Dim.Render("mode:")+t.ClaudeStyle.Render(m.permissionMode))
+		rightParts = append(rightParts, lipgloss.NewStyle().Foreground(t.Warning).Render(m.permissionMode))
 	}
 	if m.theme.Name != "" {
-		rightParts = append(rightParts, m.theme.Name)
+		rightParts = append(rightParts, t.Muted.Render(m.theme.Name))
 	}
 	if m.cwd != "" {
-		rightParts = append(rightParts, truncate(m.cwd, 40))
+		rightParts = append(rightParts, t.Muted.Render(truncateWidth(m.cwd, 40)))
 	}
 	right := ""
 	if len(rightParts) > 0 {
-		right = strings.Join(rightParts, " · ")
+		right = strings.Join(rightParts, sep) + " "
 	}
+
 	gap := strings.Repeat(" ", max(1, m.width-lipgloss.Width(left)-lipgloss.Width(right)-2))
-	bar := left + gap + right
-	return t.Status.Width(m.width).Render(bar)
+	return t.Status.Width(m.width).Render(left + gap + right)
+}
+
+// renderRuntimeLine trails the transcript with the live activity label, so the
+// one thing that actually changes sits right under the newest message instead of
+// being parked in the bottom chrome.
+func (m Model) renderRuntimeLine() string {
+	t := m.theme
+	label := strings.TrimSpace(m.status)
+
+	if m.spinnerActive {
+		line := renderSpinnerLabel(t, m.spinnerFrame, label, m.loadingStart)
+		if m.activeToolName != "" {
+			line += t.Muted.Render(" "+glyphs.Separator+" ") + t.Tool.Render(m.activeToolName)
+		}
+		return line
+	}
+
+	// Idle "Ready" used to live in its own chrome row. Trailing it into the
+	// transcript costs a permanent viewport line and scrolls short command
+	// output (e.g. /help) off the top of a 20-row terminal — skip it.
+	if label == "" || label == "Ready" {
+		return ""
+	}
+	return t.Muted.Render(glyphs.Idle + " " + label)
+}
+
+// renderUsageBar puts the context/cache meters on their own row under the
+// prompt. Inside the input box they fought the typed text for the same line.
+func (m Model) renderUsageBar() string {
+	t := m.theme
+	status := m.renderUsageStatus()
+	if status == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().
+		Background(t.Background).
+		Width(max(1, m.width)).
+		Render(" " + status)
 }
 
 func (m Model) renderUsageStatus() string {
+	t := m.theme
 	usage := m.tokenUsage
 	used := m.displayContextTokens()
 	limit := m.currentContextLimit()
-	// Always-visible footer. Cache combines read+write as one progress bar
-	// against total input-side tokens (uncached input + cache read + cache write).
-	bar := renderContextProgressBar(used, limit, 12)
-	parts := []string{fmt.Sprintf("%s %s/%s", bar, compactTokens(used), renderContextLimit(limit))}
+	sep := t.Muted.Render(" " + glyphs.Separator + " ")
+
+	// Always-visible footer. The meter is tinted by fill ratio so a nearly full
+	// context window reads as a warning without extra wording.
+	meter := lipgloss.NewStyle().
+		Foreground(t.ProgressColor(used, limit)).
+		Render(renderContextProgressBar(used, limit, 10))
+	parts := []string{fmt.Sprintf("%s %s %s/%s",
+		meter,
+		t.Muted.Render("ctx"),
+		compactTokens(used),
+		renderContextLimit(limit),
+	)}
 
 	inputSide := usageInputSideTotal(usage.InputTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens)
-	cacheTotal := usage.CacheReadInputTokens + usage.CacheCreationInputTokens
-	if cacheTotal < 0 {
-		cacheTotal = 0
-	}
-	parts = append(parts, fmt.Sprintf("cache %s %s (%s)",
-		renderContextProgressBar(cacheTotal, inputSide, 8),
-		compactTokens(cacheTotal),
-		tokenSharePercent(cacheTotal, inputSide),
+	cacheRead := max64(0, usage.CacheReadInputTokens)
+	cacheWrite := max64(0, usage.CacheCreationInputTokens)
+	parts = append(parts, fmt.Sprintf("%s %s/%s (%s)",
+		t.Muted.Render("cache"),
+		compactTokens(cacheRead),
+		compactTokens(cacheWrite),
+		tokenSharePercent(cacheRead+cacheWrite, inputSide),
 	))
-	return strings.Join(parts, " · ")
+	parts = append(parts, fmt.Sprintf("%s %s",
+		t.Muted.Render("out"),
+		compactTokens(max64(0, usage.OutputTokens)),
+	))
+	return strings.Join(parts, sep)
+}
+
+func max64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // applyTokenUsage updates the latest context estimate and session token counters.
@@ -1861,7 +1892,7 @@ func renderContextProgressBar(used, limit int64, width int) string {
 		width = 4
 	}
 	if limit <= 0 {
-		return "[" + strings.Repeat("░", width) + "]"
+		return strings.Repeat(glyphs.BarEmpty, width)
 	}
 	// Floor division for share bars; round-up only when used > 0 so tiny non-zero
 	// values still show one block (same as context occupancy).
@@ -1875,7 +1906,7 @@ func renderContextProgressBar(used, limit int64, width int) string {
 	if filled < 0 {
 		filled = 0
 	}
-	return "[" + strings.Repeat("█", filled) + strings.Repeat("░", width-filled) + "]"
+	return strings.Repeat(glyphs.BarFilled, filled) + strings.Repeat(glyphs.BarEmpty, width-filled)
 }
 
 func compactTokens(value int64) string {
@@ -2227,19 +2258,20 @@ func (m Model) renderTodoPanel() string {
 	}
 	t := m.theme
 	limit := min(3, len(m.todos))
-	lines := []string{" " + t.ClaudeStyle.Render("Todos")}
+	bar := t.PanelBar.Render(glyphs.PanelBar)
+	lines := []string{" " + bar + " " + t.PanelTitle.Render("Todos")}
 	for _, todo := range m.todos[:limit] {
-		marker := "[ ]"
+		marker := t.Muted.Render(glyphs.TodoPending)
 		switch strings.ToLower(todo.Status) {
 		case "in_progress":
-			marker = "[→]"
+			marker = lipgloss.NewStyle().Foreground(t.Claude).Render(glyphs.TodoActive)
 		case "completed":
-			marker = "[✓]"
+			marker = lipgloss.NewStyle().Foreground(t.Success).Render(glyphs.TodoDone)
 		}
-		lines = append(lines, "  "+marker+" "+truncate(oneLine(todo.Content), max(20, m.width-10)))
+		lines = append(lines, " "+bar+" "+marker+" "+truncateWidth(oneLine(todo.Content), max(20, m.width-10)))
 	}
 	if len(m.todos) > limit {
-		lines = append(lines, "  "+t.Dim.Render(fmt.Sprintf("+%d more", len(m.todos)-limit)))
+		lines = append(lines, " "+bar+" "+t.Muted.Render(fmt.Sprintf("+%d more", len(m.todos)-limit)))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -2251,9 +2283,10 @@ func (m Model) renderAgentPanel() string {
 	t := m.theme
 	limit := min(2, len(m.agentActivities))
 	start := len(m.agentActivities) - limit
-	lines := []string{" " + t.Assistant.Render("Agents")}
+	bar := t.PanelBar.Render(glyphs.PanelBar)
+	lines := []string{" " + bar + " " + t.PanelTitle.Render("Agents")}
 	for _, activity := range m.agentActivities[start:] {
-		line := "  " + oneLine(agentStatusContent(AgentStatusMsg{
+		line := " " + bar + " " + oneLine(agentStatusContent(AgentStatusMsg{
 			ID:          activity.ID,
 			ParentID:    activity.ParentID,
 			Role:        activity.Role,
@@ -2296,22 +2329,28 @@ func (m *Model) resize() {
 }
 
 func (m Model) layout() tuiLayout {
+	// Bottom chrome, top→bottom under the viewport:
+	//   session bar (1) + input box (2 text + 2 border = 4) + usage (1) + activity
+	// statusHeight covers session + usage. Earlier math treated the input as 4
+	// total rows while it actually painted 6, which oversized the viewport.
 	inputHeight := 4
-	statusHeight := 2 // runtime status line + context/status line
+	statusHeight := 2 // session row + usage row
+	usageHeight := 1
 	dialogHeight := m.activeDialogHeight()
 	activityHeight := m.activityPanelHeight()
 	return tuiLayout{
 		viewportHeight: max(1, m.height-inputHeight-statusHeight-dialogHeight-activityHeight),
 		inputWidth:     max(1, m.width-4),
-		inputHeight:    3,
+		inputHeight:    2,
 		statusHeight:   statusHeight,
 		dialogHeight:   dialogHeight,
 		permHeight:     dialogHeight,
 		activityHeight: activityHeight,
-		inputY:         max(0, m.height-inputHeight-activityHeight),
-		dialogY:        max(0, m.height-inputHeight-statusHeight-dialogHeight-activityHeight),
-		permY:          max(0, m.height-activityHeight),
-		activityY:      max(0, m.height-activityHeight),
+		// input sits above the usage row and activity panel.
+		inputY:    max(0, m.height-activityHeight-usageHeight-inputHeight),
+		dialogY:   max(0, m.height-inputHeight-statusHeight-dialogHeight-activityHeight),
+		permY:     max(0, m.height-activityHeight),
+		activityY: max(0, m.height-activityHeight),
 	}
 }
 
@@ -2429,12 +2468,12 @@ func (m Model) renderListScrollbar(total, visible, offset, height int) string {
 	if height <= 0 {
 		return ""
 	}
-	trackStyle := lipgloss.NewStyle().Foreground(m.theme.Subtle)
-	thumbStyle := lipgloss.NewStyle().Foreground(m.theme.Claude)
+	trackStyle := lipgloss.NewStyle().Foreground(m.theme.BorderSubtle)
+	thumbStyle := lipgloss.NewStyle().Foreground(m.theme.Border)
 	if total <= visible {
 		var b strings.Builder
 		for i := 0; i < height; i++ {
-			b.WriteString(trackStyle.Render(" │"))
+			b.WriteString(trackStyle.Render(" " + glyphs.ScrollTrack))
 			if i < height-1 {
 				b.WriteString("\n")
 			}
@@ -2554,8 +2593,35 @@ func (m *Model) appendAssistantDelta(text string) {
 }
 
 func (m *Model) refreshViewport() {
-	m.viewport.SetContent(renderMessages(m.messages, m.theme, m.showTimestamp, m.viewport.Width))
+	m.viewport.SetContent(m.viewportContent())
 	m.viewport.GotoBottom()
+}
+
+// repaintViewport re-renders the transcript without forcing the scroll position.
+// Spinner ticks go through here so an animating runtime line cannot yank a user
+// who scrolled up back down to the bottom.
+func (m *Model) repaintViewport() {
+	atBottom := m.viewport.AtBottom()
+	offset := m.viewport.YOffset
+	m.viewport.SetContent(m.viewportContent())
+	if atBottom {
+		m.viewport.GotoBottom()
+		return
+	}
+	m.viewport.YOffset = offset
+}
+
+// viewportContent is the transcript plus the trailing runtime label.
+func (m Model) viewportContent() string {
+	body := strings.TrimRight(renderMessages(m.messages, m.theme, m.showTimestamp, m.viewport.Width), "\n")
+	runtime := m.renderRuntimeLine()
+	if runtime == "" {
+		return body
+	}
+	if body == "" {
+		return runtime
+	}
+	return body + "\n\n" + runtime
 }
 
 func (m *Model) copyInput() {

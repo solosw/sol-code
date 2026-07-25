@@ -47,15 +47,15 @@ func TestTokenUsageAccumulatesSessionTotals(t *testing.T) {
 	}
 
 	status := m.renderUsageStatus()
-	if !strings.Contains(status, "[") || !strings.Contains(status, "]") {
+	if !strings.Contains(status, glyphs.BarFilled) && !strings.Contains(status, glyphs.BarEmpty) {
 		t.Fatalf("status should include progress bar, got %q", status)
 	}
-	if !strings.Contains(status, "cache [") {
+	if !strings.Contains(status, "cache 5k/500") {
 		t.Fatalf("status should show combined cache bar, got %q", status)
 	}
 	// 5k read + 500 write = 5.5k combined
-	if !strings.Contains(status, "5.5k") && !strings.Contains(status, "5500") {
-		t.Fatalf("status should show combined cache total 5.5k, got %q", status)
+	if !strings.Contains(status, "out 150") {
+		t.Fatalf("status should show output tokens, got %q", status)
 	}
 }
 
@@ -64,7 +64,7 @@ func TestUsageStatusAlwaysShowsCache(t *testing.T) {
 	m.tokenUsage.MaxContextTokens = 200_000
 	// Fresh session: zeros should still render separate read/write bars.
 	status := m.renderUsageStatus()
-	if !strings.Contains(status, "cache [░░░░░░░░] 0 (0%)") {
+	if !strings.Contains(status, "cache 0/0 (0%)") {
 		t.Fatalf("expected always-visible zero cache bar, got %q", status)
 	}
 
@@ -81,13 +81,11 @@ func TestUsageStatusAlwaysShowsCache(t *testing.T) {
 	})
 	status = m.renderUsageStatus()
 	// input=1000, read=800, write=200 → cache=1000, input-side=2000 → 50%
-	if !strings.Contains(status, "cache [") || !strings.Contains(status, "(50%)") {
+	if !strings.Contains(status, "cache 800/200") || !strings.Contains(status, "(50%)") {
 		t.Fatalf("expected combined cache 50%% share, got %q", status)
 	}
-	if !strings.Contains(status, "1k") && !strings.Contains(status, "1000") {
-		if !strings.Contains(status, "1k") && !strings.Contains(status, "1000") {
-			t.Fatalf("expected combined cache total 1k, got %q", status)
-		}
+	if !strings.Contains(status, "out 50") {
+		t.Fatalf("expected output tokens on the usage row, got %q", status)
 	}
 }
 
@@ -165,20 +163,20 @@ func TestTokenUsageResetsOnSessionReplace(t *testing.T) {
 
 func TestRenderContextProgressBar(t *testing.T) {
 	empty := renderContextProgressBar(0, 100, 10)
-	if empty != "[░░░░░░░░░░]" {
+	if empty != strings.Repeat(glyphs.BarEmpty, 10) {
 		t.Fatalf("empty bar = %q", empty)
 	}
 	full := renderContextProgressBar(100, 100, 10)
-	if full != "[██████████]" {
+	if full != strings.Repeat(glyphs.BarFilled, 10) {
 		t.Fatalf("full bar = %q", full)
 	}
 	half := renderContextProgressBar(50, 100, 10)
-	if !strings.Contains(half, "█") || !strings.Contains(half, "░") {
+	if !strings.Contains(half, glyphs.BarFilled) || !strings.Contains(half, glyphs.BarEmpty) {
 		t.Fatalf("half bar should mix filled/empty, got %q", half)
 	}
 	// No limit → empty track.
 	unknown := renderContextProgressBar(10, 0, 8)
-	if unknown != "[░░░░░░░░]" {
+	if unknown != strings.Repeat(glyphs.BarEmpty, 8) {
 		t.Fatalf("unknown limit bar = %q", unknown)
 	}
 }

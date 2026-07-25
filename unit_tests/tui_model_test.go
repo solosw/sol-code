@@ -191,15 +191,22 @@ func TestTUIModelWelcomeRendersCenteredLogo(t *testing.T) {
 	}
 }
 
-func TestTUIModelUserMessageRendersBoxWithoutPromptMarker(t *testing.T) {
+func TestTUIModelUserMessageRendersMarkerWithoutFence(t *testing.T) {
 	model := newTUI(t)
 	model.ReplaceMessages([]tui.ChatMessage{{Role: "user", Content: "hello user"}})
 	view := model.View()
-	if !strings.Contains(view, "hello user") || !strings.Contains(view, "╭") || !strings.Contains(view, "╰") {
-		t.Fatalf("expected user message box in view: %s", view)
+	if !strings.Contains(view, "hello user") {
+		t.Fatalf("expected user message content in view: %s", view)
 	}
-	if strings.Contains(view, "❯") {
-		t.Fatalf("expected user message without prompt marker: %s", view)
+	if !strings.Contains(view, "❯") {
+		t.Fatalf("expected user message marker in view: %s", view)
+	}
+	// Fences around chat messages are gone — chrome (input/welcome) may still use them.
+	// The content line itself must not sit inside a box border.
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "hello user") && (strings.Contains(line, "│") || strings.Contains(line, "╭") || strings.Contains(line, "╰")) {
+			t.Fatalf("expected user message without fence on content line: %s", line)
+		}
 	}
 }
 
@@ -459,17 +466,39 @@ func TestTUIModelUsageStatusAlwaysVisible(t *testing.T) {
 	}
 }
 
-func TestTUIModelRuntimeStatusRendersAboveContextStatus(t *testing.T) {
+func TestTUIModelSessionBarRendersAboveUsageBar(t *testing.T) {
 	model := newTUI(t)
 	model.SetContextLimitFn(func() int64 { return 1000000 })
+	model.SetModelName("claude-test")
 	view := model.View()
-	readyIndex := strings.Index(view, "Ready")
+	// Chrome order is session bar → input → usage bar. Idle "Ready" no longer
+	// occupies a permanent row; usage (ctx) lives under the prompt.
+	sessionIndex := strings.Index(view, "claude-test")
 	ctxIndex := strings.Index(view, "ctx ")
-	if readyIndex < 0 || ctxIndex < 0 {
-		t.Fatalf("expected Ready and ctx status lines in view: %s", view)
+	if sessionIndex < 0 || ctxIndex < 0 {
+		t.Fatalf("expected session model name and ctx usage in view: %s", view)
 	}
-	if readyIndex > ctxIndex {
-		t.Fatalf("expected runtime status above context status: %s", view)
+	if sessionIndex > ctxIndex {
+		t.Fatalf("expected session bar above usage bar: %s", view)
+	}
+}
+
+func TestTUIModelActiveRuntimeRendersInTranscript(t *testing.T) {
+	model := newTUI(t)
+	updated, _ := model.Update(tui.ToolStartMsg{Name: "Bash", Input: `{"command":"ls"}`})
+	model = updated.(tui.Model)
+	view := model.View()
+	// Active runtime trails the transcript (above the session/input chrome).
+	statusIndex := strings.Index(view, "正在运行")
+	if statusIndex < 0 {
+		statusIndex = strings.Index(view, "Bash")
+	}
+	sessionChrome := strings.Index(view, "Ask solcode")
+	if statusIndex < 0 {
+		t.Fatalf("expected active runtime status in view: %s", view)
+	}
+	if sessionChrome >= 0 && statusIndex > sessionChrome {
+		t.Fatalf("expected runtime status above input chrome: %s", view)
 	}
 }
 

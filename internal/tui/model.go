@@ -1775,8 +1775,8 @@ func (m Model) renderUsageStatus() string {
 	limit := m.currentContextLimit()
 	sep := t.Muted.Render(" " + glyphs.Separator + " ")
 
-	// Always-visible footer. The meter is tinted by fill ratio so a nearly full
-	// context window reads as a warning without extra wording.
+	// Always-visible footer. Meters are tinted by fill ratio so a nearly full
+	// context / cache window reads as a warning without extra wording.
 	meter := lipgloss.NewStyle().
 		Foreground(t.ProgressColor(used, limit)).
 		Render(renderContextProgressBar(used, limit, 10))
@@ -1790,11 +1790,15 @@ func (m Model) renderUsageStatus() string {
 	inputSide := usageInputSideTotal(usage.InputTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens)
 	cacheRead := max64(0, usage.CacheReadInputTokens)
 	cacheWrite := max64(0, usage.CacheCreationInputTokens)
-	parts = append(parts, fmt.Sprintf("%s %s/%s (%s)",
+	cacheUsed := cacheRead + cacheWrite
+	cacheMeter := lipgloss.NewStyle().
+		Foreground(t.ProgressColor(cacheUsed, inputSide)).
+		Render(renderContextProgressBar(cacheUsed, inputSide, 10))
+	parts = append(parts, fmt.Sprintf("%s %s %s/%s",
+		cacheMeter,
 		t.Muted.Render("cache"),
-		compactTokens(cacheRead),
-		compactTokens(cacheWrite),
-		tokenSharePercent(cacheRead+cacheWrite, inputSide),
+		compactTokens(cacheUsed),
+		compactTokens(inputSide),
 	))
 	parts = append(parts, fmt.Sprintf("%s %s",
 		t.Muted.Render("out"),

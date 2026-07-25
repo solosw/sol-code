@@ -191,22 +191,15 @@ func TestTUIModelWelcomeRendersCenteredLogo(t *testing.T) {
 	}
 }
 
-func TestTUIModelUserMessageRendersMarkerWithoutFence(t *testing.T) {
+func TestTUIModelUserMessageRendersBoxWithoutPromptMarker(t *testing.T) {
 	model := newTUI(t)
 	model.ReplaceMessages([]tui.ChatMessage{{Role: "user", Content: "hello user"}})
 	view := model.View()
-	if !strings.Contains(view, "hello user") {
-		t.Fatalf("expected user message content in view: %s", view)
+	if !strings.Contains(view, "hello user") || !strings.Contains(view, "╭") || !strings.Contains(view, "╰") {
+		t.Fatalf("expected user message box in view: %s", view)
 	}
-	if !strings.Contains(view, "❯") {
-		t.Fatalf("expected user message marker in view: %s", view)
-	}
-	// Fences around chat messages are gone — chrome (input/welcome) may still use them.
-	// The content line itself must not sit inside a box border.
-	for _, line := range strings.Split(view, "\n") {
-		if strings.Contains(line, "hello user") && (strings.Contains(line, "│") || strings.Contains(line, "╭") || strings.Contains(line, "╰")) {
-			t.Fatalf("expected user message without fence on content line: %s", line)
-		}
+	if strings.Contains(view, "❯") {
+		t.Fatalf("expected user message without prompt marker: %s", view)
 	}
 }
 
@@ -445,14 +438,18 @@ func TestTUIModelUsageStatusRenders(t *testing.T) {
 	updated, _ := model.Update(tui.TokenUsageMsg{EstimatedContextTokens: 1900, InputTokens: 1200, CacheCreationInputTokens: 200, CacheReadInputTokens: 800, OutputTokens: 250, MaxContextTokens: 1000000})
 	model = updated.(tui.Model)
 	view := model.View()
-	if !strings.Contains(view, "/1M") || !strings.Contains(view, "ctx 1.9k") || !strings.Contains(view, "cache 800/200 (45%)") || !strings.Contains(view, "out 250") {
-		t.Fatalf("expected usage status with cache percentage in view: %s", view)
+	// cacheUsed=1000, inputSide=1200+800+200=2200 → cache 1k/2.2k with progress bar like ctx
+	if !strings.Contains(view, "/1M") || !strings.Contains(view, "ctx 1.9k") || !strings.Contains(view, "cache 1k/2.2k") || !strings.Contains(view, "out 250") {
+		t.Fatalf("expected usage status with ctx+cache meters in view: %s", view)
 	}
 	if strings.Contains(view, "⏎ send") || strings.Contains(view, "Alt+⏎ newline") {
 		t.Fatalf("expected input hint to be replaced by usage status: %s", view)
 	}
 	if strings.Count(view, "ctx ") != 1 {
-		t.Fatalf("expected ctx usage to render once in the input row only: %s", view)
+		t.Fatalf("expected ctx usage to render once in the usage row only: %s", view)
+	}
+	if strings.Count(view, "cache ") != 1 {
+		t.Fatalf("expected cache usage to render once: %s", view)
 	}
 }
 

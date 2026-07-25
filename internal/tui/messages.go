@@ -83,15 +83,21 @@ func renderUserMessage(b *strings.Builder, msg ChatMessage, t Theme, ts string, 
 	if content == "" {
 		return
 	}
-	// Claude-style marker + plain text — no rounded fence around the body.
-	lead := t.User.Render(UserMark + " ")
-	b.WriteString(leadBlock(wrapBody(content, width, UserMark+" "), lead))
+	// User turns keep a rounded card (no ❯/prompt marker) so they stay visually
+	// distinct from assistant marker+connector output.
+	body := strings.TrimRight(wrapIndent(content, max(10, width-4), ""), "\n")
+	boxWidth := min(max(16, maxLineWidth(body)+4), max(16, width))
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.Claude).
+		Padding(0, 1).
+		Width(boxWidth).
+		Render(body)
 	if ts != "" {
-		// Timestamp rides the trailing edge of the first line via a second write
-		// would fight wrap; keep it as a quiet footnote instead.
-		b.WriteString(t.Dim.Render(strings.TrimSpace(ts)))
+		b.WriteString(t.Dim.Render("You" + ts))
 		b.WriteString("\n")
 	}
+	b.WriteString(box)
 	b.WriteString("\n")
 }
 

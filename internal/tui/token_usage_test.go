@@ -47,13 +47,14 @@ func TestTokenUsageAccumulatesSessionTotals(t *testing.T) {
 	}
 
 	status := m.renderUsageStatus()
-	if !strings.Contains(status, glyphs.BarFilled) && !strings.Contains(status, glyphs.BarEmpty) {
-		t.Fatalf("status should include progress bar, got %q", status)
+	// ctx and cache both render progress bars (filled and/or empty track).
+	if strings.Count(status, glyphs.BarFilled)+strings.Count(status, glyphs.BarEmpty) < 20 {
+		t.Fatalf("status should include ctx+cache progress bars, got %q", status)
 	}
-	if !strings.Contains(status, "cache 5k/500") {
-		t.Fatalf("status should show combined cache bar, got %q", status)
+	// 5k read + 500 write = 5.5k cache; input-side includes uncached input too.
+	if !strings.Contains(status, "cache 5.5k/") {
+		t.Fatalf("status should show cache used/total with progress bar, got %q", status)
 	}
-	// 5k read + 500 write = 5.5k combined
 	if !strings.Contains(status, "out 150") {
 		t.Fatalf("status should show output tokens, got %q", status)
 	}
@@ -62,14 +63,16 @@ func TestTokenUsageAccumulatesSessionTotals(t *testing.T) {
 func TestUsageStatusAlwaysShowsCache(t *testing.T) {
 	m := New(nil)
 	m.tokenUsage.MaxContextTokens = 200_000
-	// Fresh session: zeros should still render separate read/write bars.
+	// Fresh session: zeros still render a cache progress bar like ctx.
 	status := m.renderUsageStatus()
-	if !strings.Contains(status, "cache 0/0 (0%)") {
-		t.Fatalf("expected always-visible zero cache bar, got %q", status)
+	if !strings.Contains(status, "cache 0/0") {
+		t.Fatalf("expected always-visible zero cache meter, got %q", status)
+	}
+	if !strings.Contains(status, glyphs.BarEmpty) {
+		t.Fatalf("expected empty progress track for zero cache, got %q", status)
 	}
 
-	// input=1000, read=800, write=200 → input-side total=2000
-	// read share 40%, write share 10%
+	// input=1000, read=800, write=200 → cacheUsed=1000, input-side total=2000
 	m.ApplyTokenUsage(TokenUsageMsg{
 		EstimatedContextTokens:   10_000,
 		InputTokens:              1_000,
@@ -80,9 +83,8 @@ func TestUsageStatusAlwaysShowsCache(t *testing.T) {
 		SessionTotals:            true,
 	})
 	status = m.renderUsageStatus()
-	// input=1000, read=800, write=200 → cache=1000, input-side=2000 → 50%
-	if !strings.Contains(status, "cache 800/200") || !strings.Contains(status, "(50%)") {
-		t.Fatalf("expected combined cache 50%% share, got %q", status)
+	if !strings.Contains(status, "cache 1k/2k") {
+		t.Fatalf("expected cache meter 1k/2k with progress bar, got %q", status)
 	}
 	if !strings.Contains(status, "out 50") {
 		t.Fatalf("expected output tokens on the usage row, got %q", status)

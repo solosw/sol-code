@@ -157,7 +157,7 @@ func TestBuildRelevantContextPrioritizesPromptMatchedCrossSessionChange(t *testi
 			t.Fatalf("Record(%q) = %v", change.Description, err)
 		}
 	}
-	contextText, err := store.BuildRelevantContext(context.Background(), "main", "please update validateToken authentication", 4_000)
+	contextText, err := store.BuildRelevantContext(context.Background(), "main", "please update validateToken authentication", 4_000, true)
 	if err != nil {
 		t.Fatalf("BuildRelevantContext() = %v", err)
 	}
@@ -168,6 +168,18 @@ func TestBuildRelevantContextPrioritizesPromptMatchedCrossSessionChange(t *testi
 	}
 	if !strings.Contains(contextText, "session review") {
 		t.Fatalf("expected cross-session label: %q", contextText)
+	}
+
+	// Opting out of cross-session memory must not surface other sessions' work.
+	isolated, err := store.BuildRelevantContext(context.Background(), "main", "please update validateToken authentication", 4_000, false)
+	if err != nil {
+		t.Fatalf("BuildRelevantContext(allowCrossSession=false) = %v", err)
+	}
+	if strings.Contains(isolated, "auth.go") || strings.Contains(isolated, "session review") {
+		t.Fatalf("did not expect cross-session events when allowCrossSession=false: %q", isolated)
+	}
+	if !strings.Contains(isolated, "ui.go") {
+		t.Fatalf("expected current-session event when allowCrossSession=false: %q", isolated)
 	}
 }
 

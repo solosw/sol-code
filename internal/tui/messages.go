@@ -11,7 +11,8 @@ func renderMessages(messages []ChatMessage, t Theme, showTimestamp bool, width i
 	var b strings.Builder
 	// Leave a small gutter; no more box-border tax after message fences were removed.
 	contentWidth := max(10, width-2)
-	for _, msg := range messages {
+	for i := 0; i < len(messages); i++ {
+		msg := messages[i]
 		ts := renderTimestamp(msg, t, showTimestamp)
 		switch msg.Role {
 		case "welcome":
@@ -23,6 +24,14 @@ func renderMessages(messages []ChatMessage, t Theme, showTimestamp bool, width i
 		case "error":
 			renderErrorMessage(&b, msg, t, ts, contentWidth)
 		case "tool":
+			// A start immediately followed by its result collapses into one
+			// Claude Code-style block: ● Tool(args) + ⎿ output. Two stacked
+			// headers for the same call read as two separate events.
+			if i+1 < len(messages) && messages[i+1].Role == "tool-done" && messages[i+1].ToolName == msg.ToolName {
+				renderToolPairMessage(&b, msg, messages[i+1], t, renderTimestamp(messages[i+1], t, showTimestamp), contentWidth)
+				i++
+				continue
+			}
 			renderToolStartMessage(&b, msg, t, ts, contentWidth)
 		case "tool-done":
 			renderToolDoneMessage(&b, msg, t, ts, contentWidth)
@@ -60,14 +69,16 @@ func renderWelcomeMessage(b *strings.Builder, msg ChatMessage, t Theme, width in
 		center(t.ClaudeStyle.Render("☀")),
 		center(t.ClaudeStyle.Render("solcode")),
 		center(t.Muted.Render(content)),
-		center(t.Muted.Render("Ask a question, edit code, or run /help for commands.")),
+		center(t.Muted.Render("Ask a question, edit code, or run ") +
+			t.Assistant.Render("/help") + t.Muted.Render(" for commands.")),
 	}
 	body := strings.Join(lines, "\n")
 	// width is the viewport width minus the border and horizontal padding. Use
 	// it directly so the welcome card occupies the full available terminal row.
+	// Accent border: this is the product's front door, not another tool card.
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.Border).
+		BorderForeground(t.Claude).
 		Padding(0, 2).
 		Width(logoWidth).
 		Render(body)
@@ -108,6 +119,9 @@ func renderAssistantMessage(b *strings.Builder, msg ChatMessage, t Theme, ts str
 	}
 	b.WriteString(t.Assistant.Render(AssistantMark) + ts + "\n")
 	markdown := renderMarkdown(content, t, max(20, width-lipgloss.Width(Connector)))
+	// Glamour prepends a blank line; dropping it keeps the ⎿ connector attached
+	// to the first line of real content instead of an empty gutter row.
+	markdown = strings.TrimLeft(markdown, "\n")
 	b.WriteString(leadBlock(markdown, t.Connector.Render(Connector)))
 	b.WriteString("\n")
 }
@@ -132,39 +146,69 @@ func renderSystemMessage(b *strings.Builder, msg ChatMessage, t Theme, ts string
 	b.WriteString("\n")
 }
 
+// toolTitle renders the Claude Code-style call header: a state-colored dot,
+// the bold tool name, and the primary argument in parentheses.
+func toolTitle(msg ChatMessage, t Theme, width int, dot lipgloss.Style) string {
+	name := lipgloss.NewStyle().Foreground(t.Text).Bold(true).Render(msg.ToolName)
+	title := dot.Render(AssistantMark) + " " + name
+	if summary := toolInputSummary(msg.ToolName, msg.Content, max(20, width-lipgloss.Width(msg.ToolName)-6)); summary != "" {
+		title += t.Muted.Render("(" + summary + ")")
+	}
+	return title
+}
+
 func renderToolStartMessage(b *strings.Builder, msg ChatMessage, t Theme, ts string, width int) {
-	summary := toolInputSummary(msg.ToolName, msg.Content, width)
-	title := AssistantMark + " " + msg.ToolName
-	if summary != "" {
-		title += " " + t.Dim.Render(summary)
-	}
-	b.WriteString(t.Tool.Render(title) + ts + "\n")
-	body := "Running " + msg.ToolName + "…"
-	if summary != "" {
-		body += "\n" + summary
-	}
-	b.WriteString(leadBlock(wrapBody(body, width, Connector), t.Connector.Render(Connector)))
+	b.WriteString(toolTitle(msg, t, width, t.Tool) + ts + "\n")
+	b.WriteString(leadBlock(wrapBody("Running…", width, Connector), t.Connector.Render(Connector)))
 	b.WriteString("\n")
 }
 
-func renderToolDoneMessage(b *strings.Builder, msg ChatMessage, t Theme, ts string, width int) {
-	title := AssistantMark + " " + msg.ToolName
-	if msg.IsError {
-		title += " failed"
-		b.WriteString(t.ErrorStyle.Render(title) + ts + "\n")
-	} else {
-		b.WriteString(t.ToolDone.Render(title) + ts + "\n")
+// renderToolPairMessage paints a completed call as one block: the header keeps
+// the input summary from the start message, the connector carries the result.
+func renderToolPairMessage(b *strings.Builder, start, done ChatMessage, t Theme, ts string, width int) {
+	dot := t.ToolDone
+	if done.IsError {
+		dot = t.ErrorStyle
 	}
+	b.WriteString(toolTitle(start, t, width, dot) + ts + "\n")
+	writeToolOutput(b, done, t, width)
+}
+
+func renderToolDoneMessage(b *strings.Builder, msg ChatMessage, t Theme, ts string, width int) {
+	dot := t.ToolDone
+	if msg.IsError {
+		dot = t.ErrorStyle
+	}
+	name := lipgloss.NewStyle().Foreground(t.Text).Bold(true).Render(msg.ToolName)
+	title := dot.Render(AssistantMark) + " " + name
+	if msg.IsError {
+		title += " " + t.ErrorStyle.Render("failed")
+	}
+	b.WriteString(title + ts + "\n")
+	writeToolOutput(b, msg, t, width)
+}
+
+// writeToolOutput renders the ⎿-connected result body shared by the paired and
+// standalone tool-done paths: collapse, diff, syntax highlight, plain text.
+func writeToolOutput(b *strings.Builder, msg ChatMessage, t Theme, width int) {
 	out := strings.TrimSpace(msg.Content)
 	if out == "" {
 		out = "(no output)"
 	}
+	style := t.ToolResult
+	if msg.IsError {
+		style = lipgloss.NewStyle().Foreground(t.Error)
+	}
 	collapsed := msg.Collapsed && !isFileMutationTool(msg.ToolName)
 	if collapsed {
 		lines := strings.Split(out, "\n")
+		first := style.Render(truncateWidth(oneLine(lines[0]), max(20, width-lipgloss.Width(Connector))))
 		if len(lines) > 1 {
-			out = lines[0] + fmt.Sprintf("\n… %d more lines (Ctrl+O to expand)", len(lines)-1)
+			first += "\n" + t.Muted.Render(fmt.Sprintf("… +%d lines (Ctrl+O to expand)", len(lines)-1))
 		}
+		b.WriteString(leadBlock(first, t.Connector.Render(Connector)))
+		b.WriteString("\n")
+		return
 	}
 
 	// Try inline diff rendering first
@@ -185,7 +229,7 @@ func renderToolDoneMessage(b *strings.Builder, msg ChatMessage, t Theme, ts stri
 		}
 	}
 
-	b.WriteString(leadBlock(wrapBody(out, width, Connector), t.Connector.Render(Connector)))
+	b.WriteString(leadBlock(style.Render(wrapBody(out, width, Connector)), t.Connector.Render(Connector)))
 	b.WriteString("\n")
 }
 

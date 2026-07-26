@@ -401,6 +401,10 @@ func (m *Model) ApplyTokenUsage(msg TokenUsageMsg) {
 func defaultToolCollapsed(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "todowrite", "todolist":
+		// Keep the checklist expanded so progress stays visible.
+		return false
+	case "writememory":
+		// One-line store/merge confirmations are short enough to expand.
 		return false
 	}
 	return !isFileMutationTool(name)
@@ -1742,6 +1746,7 @@ func (m Model) renderRuntimeLine() string {
 		if m.activeToolName != "" {
 			line += t.Muted.Render(" "+glyphs.Separator+" ") + t.Tool.Render(m.activeToolName)
 		}
+		line += t.Muted.Render(" " + glyphs.Separator + " ctrl+c interrupt")
 		return line
 	}
 
@@ -2140,10 +2145,12 @@ func (m Model) renderPermissionDialog() string {
 	t := m.theme
 	dialogWidth := min(60, m.width-4)
 	title := t.PermTitle.Render(ErrorMark + "  Permission Required")
-	tool := t.Tool.Render(m.pending.toolName)
-	desc := truncate(strings.TrimSpace(m.pending.description), 600)
-	hint := t.PermHint.Render("[y] Allow   [n] Deny")
-	body := strings.Join([]string{title, "", "Tool: " + tool, desc, "", hint}, "\n")
+	tool := lipgloss.NewStyle().Foreground(t.Text).Bold(true).Render(m.pending.toolName)
+	desc := t.Muted.Render(truncate(strings.TrimSpace(m.pending.description), 600))
+	hint := lipgloss.NewStyle().Foreground(t.Success).Render("[y] Allow") +
+		t.PermHint.Render("   ") +
+		lipgloss.NewStyle().Foreground(t.Error).Render("[n] Deny")
+	body := strings.Join([]string{title, "", t.Muted.Render("Tool: ") + tool, desc, "", hint}, "\n")
 	return m.fitOverlay(lipgloss.PlaceHorizontal(m.width, lipgloss.Center, t.DialogBorder.Width(dialogWidth).Render(body)))
 }
 
@@ -2262,17 +2269,29 @@ func (m Model) renderTodoPanel() string {
 	}
 	t := m.theme
 	limit := min(3, len(m.todos))
+	done := 0
+	for _, todo := range m.todos {
+		if strings.EqualFold(strings.TrimSpace(todo.Status), "completed") {
+			done++
+		}
+	}
 	bar := t.PanelBar.Render(glyphs.PanelBar)
-	lines := []string{" " + bar + " " + t.PanelTitle.Render("Todos")}
+	title := t.PanelTitle.Render("Todos") + t.Muted.Render(fmt.Sprintf(" %d/%d", done, len(m.todos)))
+	lines := []string{" " + bar + " " + title}
 	for _, todo := range m.todos[:limit] {
 		marker := t.Muted.Render(glyphs.TodoPending)
+		text := truncateWidth(oneLine(todo.Content), max(20, m.width-10))
 		switch strings.ToLower(todo.Status) {
 		case "in_progress":
 			marker = lipgloss.NewStyle().Foreground(t.Claude).Render(glyphs.TodoActive)
+			text = lipgloss.NewStyle().Foreground(t.Text).Render(text)
 		case "completed":
 			marker = lipgloss.NewStyle().Foreground(t.Success).Render(glyphs.TodoDone)
+			text = t.Muted.Strikethrough(true).Render(text)
+		default:
+			text = t.Muted.Render(text)
 		}
-		lines = append(lines, " "+bar+" "+marker+" "+truncateWidth(oneLine(todo.Content), max(20, m.width-10)))
+		lines = append(lines, " "+bar+" "+marker+" "+text)
 	}
 	if len(m.todos) > limit {
 		lines = append(lines, " "+bar+" "+t.Muted.Render(fmt.Sprintf("+%d more", len(m.todos)-limit)))

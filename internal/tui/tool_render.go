@@ -21,7 +21,11 @@ func toolInputSummary(toolName, input string, width int) string {
 }
 
 func commonToolSummary(toolName string, fields map[string]any) string {
-	keys := []string{"command", "file_path", "path", "url", "pattern", "query"}
+	// Todo payloads are a JSON wall; a count reads better than the raw input.
+	if todos, ok := fields["todos"].([]any); ok {
+		return fmt.Sprintf("%d items", len(todos))
+	}
+	keys := []string{"command", "file_path", "path", "url", "pattern", "query", "prompt", "description", "memory", "skill"}
 	for _, key := range keys {
 		if value := fieldString(fields, key); value != "" {
 			return value

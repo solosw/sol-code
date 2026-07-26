@@ -223,6 +223,8 @@ func New(cfg config.Config, opts ...Option) (*App, error) {
 			PromotionAccessThreshold: cfg.Memory.PromotionAccessThreshold,
 			PromotionConfidence:      cfg.Memory.PromotionConfidence,
 		}}).WithRetrievalBudget(cfg.Memory.RetrievalM2Limit, cfg.Memory.RetrievalM3Limit, cfg.Memory.RetrievalM4Limit, cfg.Memory.RetrievalM5Limit)
+		// Let the model decide when a fact is worth remembering across sessions.
+		registry.Register(tool.NewWriteMemoryTool(application))
 	}
 
 	return application, nil
@@ -390,6 +392,7 @@ func (a *App) ReloadFeatures(cfg config.Config, mcpFactory mcp.ClientFactory) er
 			PromotionAccessThreshold: cfg.Memory.PromotionAccessThreshold,
 			PromotionConfidence:      cfg.Memory.PromotionConfidence,
 		}}).WithRetrievalBudget(cfg.Memory.RetrievalM2Limit, cfg.Memory.RetrievalM3Limit, cfg.Memory.RetrievalM4Limit, cfg.Memory.RetrievalM5Limit)
+		registry.Register(tool.NewWriteMemoryTool(a))
 	} else {
 		a.MemoryManager = nil
 	}
@@ -588,7 +591,9 @@ func (a *App) projectKnowledgeContext(ctx context.Context, current *session.Sess
 		}
 		parts = append(parts, strings.TrimSpace(b.String()))
 	}
-	graphContext, err := a.ChangeGraph.BuildRelevantContext(ctx, string(current.Metadata.ID), prompt, maxCharacters)
+	// Cross-session project knowledge is only injected when the session opted in.
+	// Declining cross-session memory on /new-session must keep this session isolated.
+	graphContext, err := a.ChangeGraph.BuildRelevantContext(ctx, string(current.Metadata.ID), prompt, maxCharacters, sessionAllowsCrossSessionMemory(current))
 	if err == nil && graphContext != "" {
 		parts = append(parts, graphContext)
 	}
@@ -2451,6 +2456,10 @@ func TestOnlySummarizeForContextWithItems(transcript, previous string, items []m
 	return summarizeForContext(transcript, previous, items)
 }
 
+// sessionAllowsCrossSessionMemory reports whether this session opted into
+// reading memories / project knowledge produced by other sessions.
+// Unset (nil) means the session never went through the /new-session prompt
+// and is treated as opted-out of cross-session memory injection.
 func sessionAllowsCrossSessionMemory(current *session.Session) bool {
 	if current == nil || current.Metadata.CrossSessionMemory == nil {
 		return false
@@ -2458,6 +2467,8 @@ func sessionAllowsCrossSessionMemory(current *session.Session) bool {
 	return *current.Metadata.CrossSessionMemory
 }
 
+// shouldRetrieveNewSessionMemory gates the one-shot memory bootstrap that runs
+// only for sessions that explicitly enabled cross-session memory.
 func shouldRetrieveNewSessionMemory(current *session.Session, newSession bool) bool {
 	if !sessionAllowsCrossSessionMemory(current) {
 		return false

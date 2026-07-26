@@ -13,33 +13,38 @@ import (
 // favors the active session and recent events when no prompt relevance is
 // available. Prefer BuildRelevantContext when the current user prompt is known.
 func (s *Store) BuildContext(ctx context.Context, sessionID string, maxCharacters int) (string, error) {
-	return s.BuildRelevantContext(ctx, sessionID, "", maxCharacters)
+	return s.BuildRelevantContext(ctx, sessionID, "", maxCharacters, true)
 }
 
 // BuildRelevantContext builds project-change context ranked by the current
 // request. Matches against paths, descriptions, language, and affected symbols
 // rank first; current-session and recency then break ties. This preserves
 // continuity without burying a request-relevant cross-session change.
-func (s *Store) BuildRelevantContext(ctx context.Context, sessionID, prompt string, maxCharacters int) (string, error) {
-	// Prefer the active session's trace, then include recent project-wide
-	// changes so useful work from other sessions remains visible.
+//
+// When allowCrossSession is false, only events from the active session are
+// included — used when the session opted out of cross-session memory.
+func (s *Store) BuildRelevantContext(ctx context.Context, sessionID, prompt string, maxCharacters int, allowCrossSession bool) (string, error) {
+	// Prefer the active session's trace, then optionally include recent
+	// project-wide changes so useful work from other sessions remains visible.
 	events, err := s.Recent(ctx, sessionID, 16)
 	if err != nil {
 		return "", err
 	}
-	projectEvents, err := s.Recent(ctx, "", 24)
-	if err != nil {
-		return "", err
-	}
-	seenEventIDs := make(map[int64]struct{}, len(events))
-	for _, event := range events {
-		seenEventIDs[event.ID] = struct{}{}
-	}
-	for _, event := range projectEvents {
-		if _, seen := seenEventIDs[event.ID]; seen {
-			continue
+	if allowCrossSession {
+		projectEvents, err := s.Recent(ctx, "", 24)
+		if err != nil {
+			return "", err
 		}
-		events = append(events, event)
+		seenEventIDs := make(map[int64]struct{}, len(events))
+		for _, event := range events {
+			seenEventIDs[event.ID] = struct{}{}
+		}
+		for _, event := range projectEvents {
+			if _, seen := seenEventIDs[event.ID]; seen {
+				continue
+			}
+			events = append(events, event)
+		}
 	}
 	if len(events) == 0 {
 		return "", nil

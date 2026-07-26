@@ -33,6 +33,9 @@ func renderMarkdown(text string, theme Theme, width int) string {
 	if err != nil {
 		return text
 	}
+	// Trim glamour's blank first/last lines before the background sequence is
+	// prepended, otherwise the leading "\n" hides behind ANSI and survives.
+	out = strings.Trim(out, "\n")
 	return strings.TrimRight(normalizeANSIBackground(out, theme.Background), "\n")
 }
 

@@ -217,6 +217,102 @@ func (m *Manager) remember(ctx context.Context, text, sourceSessionID, workDir, 
 	return created, true, err
 }
 
+// DirectInput is a caller-authored memory entry. It is used when the decision
+// to remember has already been made deliberately (e.g. the model calling the
+// WriteMemory tool), so no extra AI judge round-trip is performed.
+type DirectInput struct {
+	Text            string
+	Kind            Kind
+	Scope           Scope
+	Tier            Tier
+	Tags            []string
+	Importance      float64
+	Reason          string
+	SourceSessionID string
+}
+
+// DirectOutcome reports how a direct write was resolved.
+type DirectOutcome struct {
+	Item     Item
+	Stored   bool
+	Merged   bool
+	MergedID string
+	Reason   string
+}
+
+// RememberDirect stores a caller-authored memory. The content gate still runs
+// (so secrets are rejected), and near-duplicates merge into the existing entry
+// instead of growing the store.
+func (m *Manager) RememberDirect(ctx context.Context, input DirectInput) (DirectOutcome, error) {
+	text := strings.TrimSpace(input.Text)
+	if text == "" {
+		return DirectOutcome{Reason: "empty memory text"}, nil
+	}
+	if m == nil || m.Store == nil {
+		return DirectOutcome{}, fmt.Errorf("memory manager store is nil")
+	}
+
+	gate := Gate(DefaultGate{})
+	if m.Gate != nil {
+		gate = m.Gate
+	}
+	if decision := gate.Evaluate(text, true); !decision.Allow {
+		reason := strings.TrimSpace(decision.RejectReason)
+		if reason == "" {
+			reason = "rejected by memory gate"
+		}
+		return DirectOutcome{Reason: reason}, nil
+	}
+
+	items, err := m.Store.List(ctx)
+	if err != nil {
+		return DirectOutcome{}, err
+	}
+	workingItems, err := m.limitWorkingSet(ctx, text, input.SourceSessionID, items)
+	if err != nil {
+		return DirectOutcome{}, err
+	}
+
+	now := time.Now()
+	candidate := NewItem(text, nonEmptyTier(input.Tier, TierLongTerm), input.SourceSessionID)
+	candidate.Kind = nonEmptyKind(input.Kind, KindFact)
+	candidate.Scope = nonEmptyScope(input.Scope, ScopeProject)
+	candidate.Tags = append([]string(nil), input.Tags...)
+	candidate.JudgeReason = strings.TrimSpace(input.Reason)
+	candidate.JudgeModel = "tool-write-memory"
+	candidate.JudgeVersion = "v1"
+	if input.Importance > 0 {
+		importance := clampUnit(input.Importance)
+		candidate.Importance = importance
+		candidate.RetentionScore = importance
+	}
+
+	for _, existing := range workingItems {
+		if !shouldMergeCandidate(existing, candidate) {
+			continue
+		}
+		merged := m.lifecycle().Apply(mergeItems(existing, candidate, now), now)
+		saved, err := m.Store.Save(ctx, merged)
+		if err != nil {
+			return DirectOutcome{}, err
+		}
+		return DirectOutcome{
+			Item:     saved,
+			Stored:   true,
+			Merged:   true,
+			MergedID: saved.ID,
+			Reason:   "merged into an existing related memory",
+		}, nil
+	}
+
+	candidate = m.lifecycle().Apply(candidate, now)
+	saved, err := m.Store.Save(ctx, candidate)
+	if err != nil {
+		return DirectOutcome{}, err
+	}
+	return DirectOutcome{Item: saved, Stored: true}, nil
+}
+
 func (m *Manager) Retrieve(ctx context.Context, query, currentSessionID string, allowCrossSession bool, limit int) ([]Item, error) {
 	if m == nil || m.Store == nil {
 		return nil, nil
@@ -445,6 +541,23 @@ func (StaticJudge) JudgeMemory(ctx context.Context, input MemoryJudgementInput) 
 func nonEmptyKind(value Kind, fallback Kind) Kind {
 	if strings.TrimSpace(string(value)) == "" {
 		return fallback
+	}
+	return value
+}
+
+func nonEmptyTier(value Tier, fallback Tier) Tier {
+	if strings.TrimSpace(string(value)) == "" {
+		return fallback
+	}
+	return value
+}
+
+func clampUnit(value float64) float64 {
+	if value < 0 {
+		return 0
+	}
+	if value > 1 {
+		return 1
 	}
 	return value
 }

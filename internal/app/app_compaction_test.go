@@ -466,6 +466,58 @@ func TestNewSessionMemoryRetrievalGate(t *testing.T) {
 	}
 }
 
+func TestProjectKnowledgeRespectsCrossSessionMemoryOptOut(t *testing.T) {
+	dir := t.TempDir()
+	store, err := changegraph.Open(filepath.Join(dir, "knowledge.db"))
+	if err != nil {
+		t.Fatalf("Open() = %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	for _, change := range []changegraph.Change{
+		{
+			SessionID:   "fresh",
+			ToolName:    "Edit",
+			Path:        "local.go",
+			Description: "current session edit",
+		},
+		{
+			SessionID:   "other",
+			ToolName:    "Edit",
+			Path:        "foreign.go",
+			Description: "other session edit",
+		},
+	} {
+		if err := store.Record(context.Background(), change); err != nil {
+			t.Fatalf("Record(%q) = %v", change.Description, err)
+		}
+	}
+
+	cfg := config.Default()
+	cfg.KnowledgeGraph.Enabled = true
+	cfg.KnowledgeGraph.ContextMaxTokens = 4000
+	application := &App{Config: cfg, ChangeGraph: store}
+
+	current := session.NewSession("fresh", dir, cfg.Model)
+	denied := false
+	current.Metadata.CrossSessionMemory = &denied
+
+	got := application.projectKnowledgeContext(context.Background(), current, "continue work")
+	if strings.Contains(got, "foreign.go") || strings.Contains(got, "session other") {
+		t.Fatalf("opted-out session must not receive foreign session knowledge: %q", got)
+	}
+	if !strings.Contains(got, "local.go") {
+		t.Fatalf("opted-out session should still see its own changes: %q", got)
+	}
+
+	allowed := true
+	current.Metadata.CrossSessionMemory = &allowed
+	got = application.projectKnowledgeContext(context.Background(), current, "continue work")
+	if !strings.Contains(got, "foreign.go") {
+		t.Fatalf("opted-in session should receive cross-session knowledge: %q", got)
+	}
+}
+
 func TestCompactUses50PercentTarget(t *testing.T) {
 	messages := []sdk.MessageParam{}
 	for i := 0; i < 12; i++ {

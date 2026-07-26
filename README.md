@@ -9,7 +9,7 @@ A terminal-based coding agent powered by Claude (Anthropic API) that can read, w
 - **Persistent sessions** — Reload saved conversation history with its original message timestamps.
 - **Batch mode** — Run one-shot prompts non-interactively via `-prompt`.
 - **Multi-model support** — Configure multiple LLM providers and models, switch at runtime with `/model` (current provider only) and `/provider`, or add them directly from their dialogs.
-- **20+ built-in tools** — Bash, Edit, Write, View, ViewImage, Grep, Glob, LS, Diff, Patch, Fetch, WebSearch, LSP, MCP, TodoWrite, AskUser, Task (sub-agents), and more.
+- **20+ built-in tools** — Bash, Edit, Write, View, ViewImage, Grep, Glob, LS, Diff, Patch, Fetch, WebSearch, LSP, MCP, TodoWrite, WriteMemory, AskUser, Task (sub-agents), and more.
 - **MCP (Model Context Protocol)** — Connect to external MCP servers over stdio or HTTP.
 - **Custom skills** — Define reusable skill files loaded from configurable directories.
 - **Hook system** — Execute shell commands on agent events (tool calls, results, completion).

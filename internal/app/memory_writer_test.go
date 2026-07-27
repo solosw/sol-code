@@ -7,6 +7,7 @@ import (
 
 	"github.com/solosw/solcode/internal/config"
 	"github.com/solosw/solcode/internal/memory"
+	"github.com/solosw/solcode/internal/session"
 	"github.com/solosw/solcode/internal/tool"
 )
 
@@ -125,6 +126,140 @@ func TestAppWriteMemoryMergesNearDuplicate(t *testing.T) {
 	}
 	if len(items) != 1 {
 		t.Fatalf("stored items = %d, want the entries merged into 1", len(items))
+	}
+}
+
+// seedMemory writes one entry attributed to the given session id.
+func seedMemory(t *testing.T, application *App, sessionID, text, kind string) {
+	t.Helper()
+	if _, err := application.WriteMemory(context.Background(), tool.MemoryWriteRequest{
+		Text:      text,
+		Kind:      kind,
+		SessionID: sessionID,
+	}); err != nil {
+		t.Fatalf("seed WriteMemory(%q) = %v", text, err)
+	}
+}
+
+func TestAppReadMemoryReturnsOwnEntries(t *testing.T) {
+	application := newMemoryWriterApp(t)
+	application.Sessions = session.NewManager(session.NewFileStore(filepath.Join(t.TempDir(), "sessions")), "main")
+	seedMemory(t, application, "s1", "Run go build ./cmd/solcode to compile the CLI.", "workflow")
+
+	result, err := application.ReadMemory(context.Background(), tool.MemoryReadRequest{
+		Query:     "build the cli",
+		Limit:     5,
+		SessionID: "s1",
+	})
+	if err != nil {
+		t.Fatalf("ReadMemory() = %v", err)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("entries = %#v, want the session's own memory", result.Entries)
+	}
+	if result.Entries[0].OtherSession {
+		t.Fatal("own entry must not be flagged as another session's")
+	}
+	if result.Entries[0].Tier != string(memory.TierProcedural) {
+		t.Fatalf("tier = %q, want %q for a workflow", result.Entries[0].Tier, memory.TierProcedural)
+	}
+}
+
+func TestAppReadMemoryHidesOtherSessionsWhenOptedOut(t *testing.T) {
+	application := newMemoryWriterApp(t)
+	sessions := session.NewManager(session.NewFileStore(filepath.Join(t.TempDir(), "sessions")), "main")
+	application.Sessions = sessions
+
+	seedMemory(t, application, "s1", "Session one records the linting rule for imports.", "fact")
+	seedMemory(t, application, "other", "Another session recorded a deployment checklist step.", "fact")
+
+	// s1 declined cross-session memory.
+	current, err := sessions.LoadOrCreate(context.Background(), "s1", application.Config.WorkDir, application.Config.Model)
+	if err != nil {
+		t.Fatalf("LoadOrCreate() = %v", err)
+	}
+	denied := false
+	current.Metadata.CrossSessionMemory = &denied
+	if err := sessions.Save(context.Background(), current); err != nil {
+		t.Fatalf("Save() = %v", err)
+	}
+
+	result, err := application.ReadMemory(context.Background(), tool.MemoryReadRequest{Limit: 10, SessionID: "s1"})
+	if err != nil {
+		t.Fatalf("ReadMemory() = %v", err)
+	}
+	if result.CrossSessionAllowed {
+		t.Fatal("CrossSessionAllowed should be false for an opted-out session")
+	}
+	for _, entry := range result.Entries {
+		if entry.OtherSession {
+			t.Fatalf("opted-out session must not see other sessions' memory: %#v", entry)
+		}
+	}
+
+	// Opting in exposes the other session's entry.
+	allowed := true
+	current.Metadata.CrossSessionMemory = &allowed
+	if err := sessions.Save(context.Background(), current); err != nil {
+		t.Fatalf("Save() = %v", err)
+	}
+	result, err = application.ReadMemory(context.Background(), tool.MemoryReadRequest{Limit: 10, SessionID: "s1"})
+	if err != nil {
+		t.Fatalf("ReadMemory() after opt-in = %v", err)
+	}
+	if !result.CrossSessionAllowed {
+		t.Fatal("CrossSessionAllowed should be true after opting in")
+	}
+	sawOther := false
+	for _, entry := range result.Entries {
+		if entry.OtherSession {
+			sawOther = true
+		}
+	}
+	if !sawOther {
+		t.Fatalf("entries = %#v, want an entry from the other session", result.Entries)
+	}
+}
+
+func TestAppReadMemoryFiltersByKind(t *testing.T) {
+	application := newMemoryWriterApp(t)
+	application.Sessions = session.NewManager(session.NewFileStore(filepath.Join(t.TempDir(), "sessions")), "main")
+	seedMemory(t, application, "s1", "The reviewer prefers short commit subjects.", "preference")
+
+	result, err := application.ReadMemory(context.Background(), tool.MemoryReadRequest{
+		Kind:      "workflow",
+		Limit:     5,
+		SessionID: "s1",
+	})
+	if err != nil {
+		t.Fatalf("ReadMemory() = %v", err)
+	}
+	if len(result.Entries) != 0 {
+		t.Fatalf("entries = %#v, want nothing for a non-matching kind", result.Entries)
+	}
+	if result.Note == "" {
+		t.Fatal("expected a note explaining the filter removed all entries")
+	}
+
+	result, err = application.ReadMemory(context.Background(), tool.MemoryReadRequest{
+		Kind:      "preference",
+		Limit:     5,
+		SessionID: "s1",
+	})
+	if err != nil {
+		t.Fatalf("ReadMemory() = %v", err)
+	}
+	if len(result.Entries) != 1 {
+		t.Fatalf("entries = %#v, want the matching preference", result.Entries)
+	}
+}
+
+func TestAppReadMemoryDisabledReturnsError(t *testing.T) {
+	cfg := config.Default()
+	cfg.Memory.Enabled = false
+	application := &App{Config: cfg}
+	if _, err := application.ReadMemory(context.Background(), tool.MemoryReadRequest{Limit: 5}); err == nil {
+		t.Fatal("expected an error when memory is disabled")
 	}
 }
 

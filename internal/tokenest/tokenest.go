@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
+	"github.com/tiktoken-go/tokenizer"
 )
 
 // Anthropic image token formula (docs):
@@ -21,11 +23,53 @@ const (
 	MinImageTokens = 85
 )
 
+// textCodec is a process-wide BPE tokenizer used for text estimates.
+// cl100k_base is the closest widely available encoding for modern LLM chat
+// workloads when the provider-specific tokenizer is not on the machine.
+// Image token estimates stay on Anthropic's documented pixel formula below.
+var (
+	textCodecOnce sync.Once
+	textCodec     tokenizer.Codec
+	textCodecErr  error
+)
+
+func getTextCodec() (tokenizer.Codec, error) {
+	textCodecOnce.Do(func() {
+		textCodec, textCodecErr = tokenizer.Get(tokenizer.Cl100kBase)
+	})
+	return textCodec, textCodecErr
+}
+
+// Text estimates tokens for a single text blob using a BPE tokenizer.
+// Empty input is free. On tokenizer init failure it falls back to a coarse
+// runes/4 heuristic so compaction and UI still get a non-zero budget signal.
 func Text(text string) int {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return 0
 	}
+	codec, err := getTextCodec()
+	if err != nil || codec == nil {
+		return fallbackTextTokens(text)
+	}
+	n, err := codec.Count(text)
+	if err != nil || n < 0 {
+		return fallbackTextTokens(text)
+	}
+	return n
+}
+
+// CodecName reports which text tokenizer is active, or "fallback" when the
+// BPE codec could not be loaded. Intended for tests and diagnostics.
+func CodecName() string {
+	codec, err := getTextCodec()
+	if err != nil || codec == nil {
+		return "fallback"
+	}
+	return codec.GetName()
+}
+
+func fallbackTextTokens(text string) int {
 	return len([]rune(text))/4 + 1
 }
 

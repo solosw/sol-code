@@ -403,8 +403,8 @@ func defaultToolCollapsed(name string) bool {
 	case "todowrite", "todolist":
 		// Keep the checklist expanded so progress stays visible.
 		return false
-	case "writememory":
-		// One-line store/merge confirmations are short enough to expand.
+	case "writememory", "readmemory":
+		// Short store/merge confirmations and memory lists read fine expanded.
 		return false
 	}
 	return !isFileMutationTool(name)

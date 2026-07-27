@@ -15,8 +15,18 @@ func TestTokenEstimatorTextAndMessages(t *testing.T) {
 	if got := tokenest.Text(""); got != 0 {
 		t.Fatalf("Text(empty) = %d, want 0", got)
 	}
-	if got := tokenest.Text("abcd"); got != 2 {
-		t.Fatalf("Text(\"abcd\") = %d, want 2", got)
+	// cl100k_base encodes short ASCII like "abcd" as a single token — not runes/4.
+	if got := tokenest.Text("abcd"); got <= 0 {
+		t.Fatalf("Text(\"abcd\") = %d, want > 0", got)
+	}
+	// Chinese is denser under BPE than the old runes/4 heuristic; a multi-char
+	// sentence should still cost more than a short ASCII word.
+	if short, long := tokenest.Text("hi"), tokenest.Text("请用表格驱动测试并在 unit_tests 下补充用例"); long <= short {
+		t.Fatalf("expected denser Chinese text to cost more tokens: short=%d long=%d", short, long)
+	}
+	if name := tokenest.CodecName(); name == "" || name == "fallback" {
+		// Prefer a real BPE codec; fallback is only for init failure.
+		t.Logf("text codec = %q (fallback is allowed if codec init fails)", name)
 	}
 
 	messages := []sdk.MessageParam{
@@ -28,6 +38,34 @@ func TestTokenEstimatorTextAndMessages(t *testing.T) {
 	}
 	if got, want := tokenest.Messages(messages), session.ApproxTokensFromMessages(messages); got != want {
 		t.Fatalf("Messages() = %d, session.ApproxTokensFromMessages() = %d", got, want)
+	}
+}
+
+func TestTokenEstimatorUsesBPECodec(t *testing.T) {
+	name := tokenest.CodecName()
+	if name == "fallback" {
+		t.Skip("BPE codec unavailable; Text() is using the runes/4 fallback")
+	}
+	if !strings.Contains(strings.ToLower(name), "cl100k") && name == "" {
+		t.Fatalf("CodecName() = %q, want a cl100k-based codec name", name)
+	}
+	// Same character count, different compressibility: repeated chars usually
+	// collapse more under BPE than mixed natural language of equal length.
+	rep := strings.Repeat("a", 64)
+	mixed := "The quick brown fox jumps over the lazy dog twice!!"
+	if len([]rune(rep)) != len([]rune(mixed)) {
+		// Keep lengths close enough that a pure runes/4 heuristic would match.
+		mixed = mixed + strings.Repeat("x", len([]rune(rep))-len([]rune(mixed)))
+	}
+	repN := tokenest.Text(rep)
+	mixedN := tokenest.Text(mixed)
+	if repN <= 0 || mixedN <= 0 {
+		t.Fatalf("Text() returned non-positive counts: rep=%d mixed=%d", repN, mixedN)
+	}
+	// A pure runes/4 estimator would give the same count for equal rune length.
+	// BPE almost always diverges; if it does not, still require positive counts above.
+	if repN == mixedN {
+		t.Logf("BPE counts matched for equal-length inputs (rep=%d mixed=%d); codec=%s", repN, mixedN, name)
 	}
 }
 

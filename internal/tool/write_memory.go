@@ -72,27 +72,30 @@ func NewWriteMemoryTool(writer MemoryWriter) Tool {
 func (t *writeMemoryTool) Name() string { return WriteMemoryToolName }
 
 func (t *writeMemoryTool) Description() string {
-	return `Store one durable memory entry that should outlive the current session.
-You decide when a memory is worth keeping — call this the moment you learn something
-durable, not at the end of the task.
+	return `Save one durable fact to memory. You decide what is worth saving, and when.
 
-Write a memory when you learn:
-- A user preference or convention ("prefers table-driven tests", "reply in Chinese")
-- A project constraint or invariant ("never edit generated pb.go", "Go 1.24 toolchain")
-- A verified command or workflow ("build: go build ./cmd/solcode", "tests live in unit_tests/")
-- A non-obvious architecture decision and the reason behind it
+Save it as soon as you learn something that would still be true and useful in a
+future session:
+- a user preference or convention (prefers table-driven tests, replies in Chinese)
+- a project rule or invariant (never edit generated files, toolchain is pinned to Go 1.24)
+- a verified command or layout (build: go build ./cmd/solcode; tests live in unit_tests/)
+- a non-obvious decision, together with the reason it was made
 
-Do NOT write a memory for:
-- Transient state (current file positions, in-flight task steps — use TodoWrite)
-- Anything already obvious from reading the repo
-- Secrets, tokens, credentials, personal data (these are rejected)
-- Raw code, diffs, logs, or transcript text — store the conclusion instead
+Do not save:
+- transient state or in-flight steps of the current task (use TodoWrite)
+- anything a quick read of the repo already makes obvious
+- secrets, tokens, credentials, or personal data (these are rejected)
+- code, diffs, logs, or transcript text; save the conclusion instead
 
-Write one self-contained sentence or two, understandable without this conversation.
-Prefer updating knowledge by writing the corrected statement; near-duplicates merge
-into the existing entry automatically.
+How to write the entry:
+- one or two plain sentences that stand on their own, with no pronouns pointing back
+  at this conversation
+- state the fact, not the story of how you found it
+- to fix something remembered wrong, just save the corrected statement
 
-Retrieved memory is injected into sessions that enabled cross-session memory.`
+Saving twice is safe: a near-duplicate merges into the existing entry instead of
+piling up. Entries are read back with ReadMemory, and sessions that enabled
+cross-session memory also get the relevant ones injected automatically at start.`
 }
 
 func (t *writeMemoryTool) InputSchema() map[string]any {

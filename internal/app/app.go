@@ -223,8 +223,9 @@ func New(cfg config.Config, opts ...Option) (*App, error) {
 			PromotionAccessThreshold: cfg.Memory.PromotionAccessThreshold,
 			PromotionConfidence:      cfg.Memory.PromotionConfidence,
 		}}).WithRetrievalBudget(cfg.Memory.RetrievalM2Limit, cfg.Memory.RetrievalM3Limit, cfg.Memory.RetrievalM4Limit, cfg.Memory.RetrievalM5Limit)
-		// Let the model decide when a fact is worth remembering across sessions.
-		registry.Register(tool.NewWriteMemoryTool(application))
+		// Let the model decide when a fact is worth remembering, and let it
+		// look up what was remembered before instead of re-deriving it.
+		registry.Register(tool.NewWriteMemoryTool(application), tool.NewReadMemoryTool(application))
 	}
 
 	return application, nil
@@ -392,7 +393,7 @@ func (a *App) ReloadFeatures(cfg config.Config, mcpFactory mcp.ClientFactory) er
 			PromotionAccessThreshold: cfg.Memory.PromotionAccessThreshold,
 			PromotionConfidence:      cfg.Memory.PromotionConfidence,
 		}}).WithRetrievalBudget(cfg.Memory.RetrievalM2Limit, cfg.Memory.RetrievalM3Limit, cfg.Memory.RetrievalM4Limit, cfg.Memory.RetrievalM5Limit)
-		registry.Register(tool.NewWriteMemoryTool(a))
+		registry.Register(tool.NewWriteMemoryTool(a), tool.NewReadMemoryTool(a))
 	} else {
 		a.MemoryManager = nil
 	}

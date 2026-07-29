@@ -74,12 +74,21 @@ func (t *writeMemoryTool) Name() string { return WriteMemoryToolName }
 func (t *writeMemoryTool) Description() string {
 	return `Save one durable fact to memory. You decide what is worth saving, and when.
 
+Use this as a normal task-lifecycle action, not only when the user explicitly
+asks you to remember something. Call it immediately after a meaningful milestone
+creates durable knowledge, and before your final response if this task produced
+such knowledge that has not already been saved.
+
 Save it as soon as you learn something that would still be true and useful in a
 future session:
 - a user preference or convention (prefers table-driven tests, replies in Chinese)
 - a project rule or invariant (never edit generated files, toolchain is pinned to Go 1.24)
-- a verified command or layout (build: go build ./cmd/solcode; tests live in unit_tests/)
+- a verified command or repository layout (build: go build ./cmd/solcode; tests live in unit_tests/)
 - a non-obvious decision, together with the reason it was made
+- a recurring failure and its fix, or a reusable workflow
+
+For substantial tasks, one to three focused entries are usually appropriate; do
+not wait until the context is being compacted.
 
 Do not save:
 - transient state or in-flight steps of the current task (use TodoWrite)

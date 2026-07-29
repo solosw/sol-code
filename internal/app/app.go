@@ -1108,6 +1108,13 @@ func (a *App) compactSession(ctx context.Context, current *session.Session, forc
 			})
 			return cleanedHistory, nil
 		}
+		if err := a.rememberCompactedSession(ctx, current, previousSummary, current.Summary, result, estimated); err != nil {
+			a.recordCompactEvent("memory_extract_failed", map[string]any{
+				"session_id": string(current.Metadata.ID),
+				"reason":     "compaction",
+				"error":      err.Error(),
+			})
+		}
 		persistCompactedContext(current, current.Summary, a.compactedProjectKnowledge(ctx, current, current.Summary))
 		a.recordCompactEvent("compact_succeeded", map[string]any{
 			"session_id":      string(current.Metadata.ID),
@@ -1129,6 +1136,13 @@ func (a *App) compactSession(ctx context.Context, current *session.Session, forc
 			"reason":     "no substantive session summary",
 		})
 		return cleanedHistory, nil
+	}
+	if err := a.rememberCompactedSession(ctx, current, previousSummary, nextSummary, result, estimated); err != nil {
+		a.recordCompactEvent("memory_extract_failed", map[string]any{
+			"session_id": string(current.Metadata.ID),
+			"reason":     "compaction",
+			"error":      err.Error(),
+		})
 	}
 	persistCompactedContext(current, nextSummary, a.compactedProjectKnowledge(ctx, current, nextSummary))
 	retainedTokens := a.estimateSessionContextTokens(ctx, current)
@@ -1208,6 +1222,26 @@ func conciseConversationLines(transcript string) []string {
 		return dedupeSummaryLines(userFallback)
 	}
 	return dedupeSummaryLines(lines)
+}
+
+func (a *App) rememberCompactedSession(ctx context.Context, current *session.Session, previousSummary, nextSummary string, result session.CompactResult, estimatedTokens int) error {
+	if a == nil || current == nil || a.MemoryManager == nil || !a.Config.Memory.Enabled {
+		return nil
+	}
+	_, err := a.MemoryManager.RememberExtracted(ctx, memory.ExtractionInput{
+		SourceSessionID:     string(current.Metadata.ID),
+		WorkDir:             current.Metadata.WorkDir,
+		PreviousSummary:     previousSummary,
+		NewSummary:          nextSummary,
+		Transcript:          result.OriginalTranscript,
+		OriginalTranscript:  result.OriginalTranscript,
+		CompactedTranscript: result.CompactedTranscript,
+		RetainedTranscript:  result.RetainedTranscript,
+		DiscardedTranscript: result.DiscardedTranscript,
+		TriggerReason:       "compaction",
+		EstimatedTokens:     estimatedTokens,
+	})
+	return err
 }
 
 func (a *App) extractSessionMemories(ctx context.Context, current *session.Session, reason string) ([]memory.Item, error) {

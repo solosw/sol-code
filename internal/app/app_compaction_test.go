@@ -10,6 +10,7 @@ import (
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/solosw/solcode/internal/changegraph"
 	"github.com/solosw/solcode/internal/config"
+	"github.com/solosw/solcode/internal/memory"
 	"github.com/solosw/solcode/internal/session"
 )
 
@@ -209,6 +210,61 @@ func TestRefreshSessionSummaryUsesAIAndPersistsResult(t *testing.T) {
 	}
 	if len(stored.Messages) != 2 {
 		t.Fatalf("background summary must preserve messages, got %d", len(stored.Messages))
+	}
+}
+
+type recordingMemoryExtractor struct {
+	input memory.ExtractionInput
+}
+
+func (e *recordingMemoryExtractor) ExtractMemories(_ context.Context, input memory.ExtractionInput) ([]memory.MemoryJudgement, error) {
+	e.input = input
+	return []memory.MemoryJudgement{{
+		ShouldStore:   true,
+		Kind:          memory.KindTask,
+		Scope:         memory.ScopeProject,
+		SuggestedTier: memory.TierShortTerm,
+		Confidence:    0.9,
+		CanonicalText: "Token validation implementation was completed.",
+		Tags:          []string{"compaction"},
+	}}, nil
+}
+
+func TestCompactSessionPersistsExtractedMemories(t *testing.T) {
+	cfg := config.Default()
+	cfg.MaxContextTokens = 100
+	cfg.Memory.Enabled = true
+	cfg.Memory.CompactionTriggerPercent = 1
+	cfg.Memory.CompactionTargetPercent = 1
+	store := memory.NewFileStore(t.TempDir())
+	extractor := &recordingMemoryExtractor{}
+	application := &App{
+		Config:        cfg,
+		MemoryManager: memory.NewManagerWithExtractor(store, nil, nil, extractor),
+		summaryWriter: &recordingSummaryWriter{summary: "Preserved implementation outcome."},
+	}
+	current := session.NewSession("named", t.TempDir(), cfg.Model)
+	current.Append(
+		sdk.NewUserMessage(sdk.NewTextBlock("implement token validation")),
+		sdk.NewAssistantMessage(sdk.NewTextBlock("completed token validation")),
+	)
+
+	changed, err := application.compactSession(context.Background(), current, false)
+	if err != nil {
+		t.Fatalf("compactSession() = %v", err)
+	}
+	if !changed {
+		t.Fatal("expected compaction to change the session")
+	}
+	items, err := store.List(context.Background())
+	if err != nil {
+		t.Fatalf("list persisted memories: %v", err)
+	}
+	if len(items) == 0 {
+		t.Fatal("expected compaction to persist extracted memory")
+	}
+	if extractor.input.TriggerReason != "compaction" || extractor.input.OriginalTranscript == "" {
+		t.Fatalf("memory extraction input = %#v", extractor.input)
 	}
 }
 

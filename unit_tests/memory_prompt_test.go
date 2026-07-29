@@ -20,6 +20,9 @@ func TestDefaultSystemPromptDocumentsMemoryTools(t *testing.T) {
 		"# Memory",
 		"WriteMemory",
 		"ReadMemory",
+		"normal task-lifecycle action",
+		"before the final response",
+		"one to three entries",
 		"cross-session memory",
 	} {
 		if !strings.Contains(req.System, want) {
@@ -31,7 +34,10 @@ func TestDefaultSystemPromptDocumentsMemoryTools(t *testing.T) {
 func TestWriteMemoryDescriptionCoversWhenAndWhatToSave(t *testing.T) {
 	desc := tool.NewWriteMemoryTool(nil).Description()
 	for _, want := range []string{
-		"durable",        // what qualifies
+		"durable",               // what qualifies
+		"normal task-lifecycle", // proactive use
+		"before your final response",
+		"one to three focused entries",
 		"TodoWrite",      // where transient state belongs instead
 		"secrets",        // rejected content
 		"near-duplicate", // merge behavior

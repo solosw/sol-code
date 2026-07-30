@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/solosw/solcode/internal/sandbox"
 )
 
 // ShellRunner knows how to turn a command string into an *exec.Cmd for the current OS.
@@ -59,7 +61,8 @@ var bannedCommands = []string{
 
 type bashTool struct {
 	BaseTool
-	shell ShellRunner
+	shell         ShellRunner
+	sandboxPolicy sandbox.Policy
 }
 
 // NewBashTool creates a new bash execution tool.
@@ -70,6 +73,11 @@ func NewBashTool() Tool {
 // NewBashToolWithShell creates a new bash execution tool with a custom ShellRunner.
 func NewBashToolWithShell(shell ShellRunner) Tool {
 	return &bashTool{shell: shell}
+}
+
+// NewBashToolWithSandbox creates a Bash tool that applies policy to each command.
+func NewBashToolWithSandbox(policy sandbox.Policy) Tool {
+	return &bashTool{shell: DefaultShell(), sandboxPolicy: policy}
 }
 
 func (b *bashTool) Name() string                             { return BashToolName }
@@ -183,6 +191,20 @@ func (b *bashTool) runCommand(ctx context.Context, command, workDir string) (str
 	if shell == nil {
 		shell = DefaultShell()
 	}
+
+	if b.sandboxPolicy.Enabled {
+		sandboxInstance, err := sandbox.NewWithPolicy(workDir, b.sandboxPolicy)
+		if err != nil {
+			return "", "", 0, err
+		}
+		program, args := shellCommand(shell, command)
+		result, err := sandboxInstance.Run(ctx, sandbox.Command{
+			Program: program,
+			Args:    args,
+		})
+		return result.Stdout, result.Stderr, result.ExitCode, err
+	}
+
 	cmd := shell.Command(ctx, command)
 	cmd.Dir = workDir
 	configureCommandCancellation(cmd)
@@ -202,6 +224,15 @@ func (b *bashTool) runCommand(ctx context.Context, command, workDir string) (str
 	}
 
 	return stdout.String(), stderr.String(), exitCode, nil
+}
+
+func shellCommand(shell ShellRunner, command string) (string, []string) {
+	switch shell.(type) {
+	case cmdShellRunner:
+		return "cmd", []string{"/c", command}
+	default:
+		return "bash", []string{"-c", command}
+	}
 }
 
 func TruncateOutput(content string, maxLen int) string {

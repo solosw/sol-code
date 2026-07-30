@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>solcode Workflow Editor</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="brand">
+        <div class="brand-title">solcode</div>
+        <div class="brand-sub">Workflow Node Editor</div>
+      </div>
+      <div class="sidebar-actions">
+        <button id="btn-new" class="btn primary">+ New workflow</button>
+        <button id="btn-refresh" class="btn">Refresh</button>
+      </div>
+      <div class="section-label">Workflows</div>
+      <div id="workflow-list" class="list"></div>
+      <div class="sidebar-foot" id="meta-foot"></div>
+    </aside>
+
+    <main id="main">
+      <header id="topbar">
+        <div class="top-fields">
+          <label>Name <input id="wf-name" type="text" placeholder="workflow-name" /></label>
+          <label class="grow">Description <input id="wf-desc" type="text" placeholder="One-line purpose" /></label>
+          <label>Mode
+            <select id="wf-mode">
+              <option value="auto">auto</option>
+              <option value="serial">serial</option>
+              <option value="parallel">parallel</option>
+            </select>
+          </label>
+          <label>Save to
+            <select id="wf-scope">
+              <option value="project">Project</option>
+              <option value="user">User</option>
+            </select>
+          </label>
+        </div>
+        <div class="top-actions">
+          <button id="btn-add-node" class="btn">+ Node</button>
+          <button id="btn-auto-layout" class="btn">Auto layout</button>
+          <button id="btn-delete-wf" class="btn danger">Delete workflow</button>
+          <button id="btn-save" class="btn primary">Save</button>
+        </div>
+      </header>
+
+      <div id="workspace">
+        <div id="canvas-wrap">
+          <svg id="edges" xmlns="http://www.w3.org/2000/svg"></svg>
+          <div id="canvas"></div>
+          <div id="hint" class="canvas-hint">
+            Drag nodes · drag from right port to left port to connect · Delete removes selection · wheel zoom · middle-drag pan
+          </div>
+        </div>
+
+        <aside id="inspector">
+          <div class="section-label">Node properties</div>
+          <div id="inspector-empty" class="muted">Select a node to edit.</div>
+          <div id="inspector-form" class="hidden">
+            <label>ID <input id="node-id" type="text" /></label>
+            <label>Description <input id="node-desc" type="text" /></label>
+            <label>Difficulty
+              <select id="node-diff">
+                <option value="easy">easy</option>
+                <option value="medium">medium</option>
+                <option value="hard">hard</option>
+                <option value="">default</option>
+              </select>
+            </label>
+            <div class="field-block">
+              <div class="field-label">Allowed tools</div>
+              <div class="multi-select" id="node-tools-wrap">
+                <button type="button" class="multi-select-toggle" id="node-tools-toggle">Select tools…</button>
+                <div class="multi-select-panel hidden" id="node-tools-panel"></div>
+              </div>
+            </div>
+            <div class="field-block">
+              <div class="field-label">Depends on</div>
+              <div class="multi-select" id="node-deps-wrap">
+                <button type="button" class="multi-select-toggle" id="node-deps-toggle">Select dependencies…</button>
+                <div class="multi-select-panel hidden" id="node-deps-panel"></div>
+              </div>
+            </div>
+            <label>Prompt <textarea id="node-prompt" rows="10" placeholder="Task instructions. Use {{args}}"></textarea></label>
+            <button id="btn-del-node" class="btn danger">Delete node</button>
+          </div>
+          <div id="status" class="status"></div>
+        </aside>
+      </div>
+    </main>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

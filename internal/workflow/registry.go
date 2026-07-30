@@ -48,6 +48,14 @@ func (r *Registry) Find(name string) (Definition, bool) {
 	return def, ok
 }
 
+// Remove drops a workflow from the in-memory registry.
+func (r *Registry) Remove(name string) {
+	if r == nil {
+		return
+	}
+	delete(r.defs, normalizeName(name))
+}
+
 func (r *Registry) Names() []string {
 	defs := r.All()
 	out := make([]string, 0, len(defs))

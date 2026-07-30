@@ -240,11 +240,14 @@ type Model struct {
 	agentActivities []AgentActivity
 	tokenUsage      TokenUsage
 
-	pending      *pendingPermission
-	pendingConf  *pendingConfirm
-	pendingAsk   *pendingAskUser
-	dialog       *DialogState
-	autocomplete *AutocompleteState
+	pending                 *pendingPermission
+	pendingConf             *pendingConfirm
+	pendingAsk              *pendingAskUser
+	dialog                  *DialogState
+	autocomplete            *AutocompleteState
+	workflowEditor          *WorkflowEditorState
+	workflowEditorCallbacks *WorkflowEditorCallbacks
+	workflowUIHandler       func() string
 
 	theme          Theme
 	modelName      string
@@ -283,6 +286,7 @@ type Model struct {
 	selectFunc        SelectFunc
 	customSelectFunc  CustomSelectFunc
 	skillNamesFn      func() []string
+	workflowNamesFn   func() []string
 	contextBaseFn     func() int64
 	contextLimitFn    func() int64
 }
@@ -364,6 +368,12 @@ func (m *Model) SetModelName(name string) {
 
 func (m *Model) SetSkillNamesFn(fn func() []string) {
 	m.skillNamesFn = fn
+}
+
+// SetWorkflowNamesFn supplies loaded workflow names for direct slash invoke.
+// Each workflow "name" is exposed as /name-workflow (suffix added if missing).
+func (m *Model) SetWorkflowNamesFn(fn func() []string) {
+	m.workflowNamesFn = fn
 }
 
 func (m *Model) SetModelNameFn(fn func() string) {
@@ -498,6 +508,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.dialog != nil && m.dialog.Active != DialogNone {
 			return m.handleDialogKey(msg)
+		}
+		if m.workflowEditor != nil {
+			return m.handleWorkflowEditorKey(msg)
 		}
 		if m.autocomplete != nil {
 			return m.handleAutocompleteKey(msg)
@@ -742,7 +755,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.pendingConf != nil || m.pendingAsk != nil || m.pending != nil || (m.dialog != nil && m.dialog.Active != DialogNone) || m.autocomplete != nil || m.selectAllMode {
+	if m.pendingConf != nil || m.pendingAsk != nil || m.pending != nil || (m.dialog != nil && m.dialog.Active != DialogNone) || m.workflowEditor != nil || m.autocomplete != nil || m.selectAllMode {
 		return m, nil
 	}
 	var cmds []tea.Cmd
@@ -1208,7 +1221,10 @@ func (m *Model) updateAutocomplete() tea.Cmd {
 	// Slash commands: whole input starts with / and has no spaces yet.
 	if strings.HasPrefix(value, "/") && !strings.Contains(value, " ") {
 		prefix := strings.TrimPrefix(value, "/")
-		commands := []string{"help", "clear", "model", "provider", "effort", "sessions", "compact", "fix-session", "new-session", "skills", "mcp", "workflows", "workflow"}
+		commands := []string{"help", "clear", "model", "provider", "effort", "sessions", "compact", "fix-session", "new-session", "skills", "mcp", "workflows", "workflow", "workflow-edit", "workflow-ui"}
+		if m.workflowNamesFn != nil {
+			commands = append(commands, m.directWorkflowSlashCommands()...)
+		}
 		if m.skillNamesFn != nil {
 			commands = append(commands, m.skillNamesFn()...)
 		}
@@ -1671,6 +1687,8 @@ func (m Model) renderActiveDialog() string {
 		return m.renderAskUserDialog()
 	case m.dialog != nil && m.dialog.Active != DialogNone:
 		return m.renderDialog()
+	case m.workflowEditor != nil:
+		return m.renderWorkflowEditor()
 	case m.pending != nil:
 		return m.renderPermissionDialog()
 	}
@@ -2386,6 +2404,8 @@ func (m Model) activeDialogHeight() int {
 		content = m.renderAskUserDialog()
 	case m.dialog != nil && m.dialog.Active != DialogNone:
 		content = m.renderDialog()
+	case m.workflowEditor != nil:
+		content = m.renderWorkflowEditor()
 	case m.pending != nil:
 		content = m.renderPermissionDialog()
 	case m.autocomplete != nil:

@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,8 @@ import (
 	"github.com/solosw/solcode/internal/skill"
 	"github.com/solosw/solcode/internal/tool"
 	"github.com/solosw/solcode/internal/tui"
+	"github.com/solosw/solcode/internal/workflow"
+	"github.com/solosw/solcode/internal/workflowui"
 )
 
 // version is injected at link time by release builds:
@@ -389,10 +392,22 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 				if name == "" {
 					return tui.CommandResultMsg{Text: "Usage: /workflow <name> [args]\nList loaded workflows with /workflows."}
 				}
-				ctx, cancel := context.WithTimeout(context.Background(), timeout)
+				// Use conversationContext so timeout<=0 means no deadline.
+				// context.WithTimeout(..., 0) expires immediately and aborts tasks mid-run.
+				ctx, cancel := conversationContext(timeout)
 				defer cancel()
 				out, err := application.RunWorkflow(ctx, name, strings.TrimSpace(rest))
 				if err != nil {
+					if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+						limit := "the configured --timeout"
+						if timeout > 0 {
+							limit = timeout.String()
+						}
+						return tui.CommandResultMsg{Text: fmt.Sprintf(
+							"Workflow %q timed out after %s while waiting for a task.\nIncrease with --timeout (e.g. --timeout 30m) and retry.\nDetail: %v",
+							name, limit, err,
+						)}
+					}
 					return tui.CommandResultMsg{Text: fmt.Sprintf("Workflow %q failed: %v", name, err)}
 				}
 				return tui.CommandResultMsg{Text: out}
@@ -501,6 +516,95 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 			}
 		}
 		return names
+	})
+	model.SetWorkflowNamesFn(func() []string {
+		if application == nil {
+			return nil
+		}
+		defs := application.ListWorkflows()
+		names := make([]string, 0, len(defs))
+		for _, def := range defs {
+			names = append(names, def.Name)
+		}
+		return names
+	})
+	var workflowUIServer *workflowui.Server
+	model.SetWorkflowUIHandler(func() string {
+		if workflowUIServer != nil && workflowUIServer.URL() != "" {
+			_ = workflowui.OpenBrowser(workflowUIServer.URL())
+			return "Workflow node editor already running at " + workflowUIServer.URL()
+		}
+		srv, url, err := workflowui.Start(workflowui.Config{
+			WorkDir:    cfg.WorkDir,
+			UserDir:    filepath.Join(config.UserConfigDir(), "workflows"),
+			ProjectDir: filepath.Join(config.ProjectConfigDir(cfg.WorkDir), "workflows"),
+			List: func() []workflow.Definition {
+				if application == nil {
+					return nil
+				}
+				return application.ListWorkflows()
+			},
+			Save: func(def workflow.Definition, scope workflow.SaveScope, layout *workflow.Layout) (string, error) {
+				if application == nil {
+					return "", fmt.Errorf("application is not available")
+				}
+				return application.SaveWorkflowWithLayout(def, scope, layout)
+			},
+			Delete: func(name string) error {
+				if application == nil {
+					return fmt.Errorf("application is not available")
+				}
+				return application.DeleteWorkflow(name)
+			},
+			Reload: func() {
+				if application != nil {
+					application.ReloadWorkflows()
+				}
+			},
+			Tools: func() []string {
+				if application == nil || application.Tools == nil {
+					return nil
+				}
+				all := application.Tools.All()
+				out := make([]string, 0, len(all))
+				for _, item := range all {
+					out = append(out, item.Name())
+				}
+				return out
+			},
+			OpenBrowser: true,
+		})
+		if err != nil {
+			return fmt.Sprintf("Could not start workflow UI: %v", err)
+		}
+		workflowUIServer = srv
+		return "Opened Dify-style workflow node editor at " + url + "\nSave target: project (.solcode/workflows) or user (~/.solcode/workflows)"
+	})
+	model.SetWorkflowEditorCallbacks(tui.WorkflowEditorCallbacks{
+		List: func() []workflow.Definition {
+			if application == nil {
+				return nil
+			}
+			return application.ListWorkflows()
+		},
+		Save: func(def workflow.Definition, scope workflow.SaveScope) (string, error) {
+			if application == nil {
+				return "", fmt.Errorf("application is not available")
+			}
+			return application.SaveWorkflow(def, scope)
+		},
+		Delete: func(name string) error {
+			if application == nil {
+				return fmt.Errorf("application is not available")
+			}
+			return application.DeleteWorkflow(name)
+		},
+		UserDir: func() string {
+			return filepath.Join(config.UserConfigDir(), "workflows")
+		},
+		ProjectDir: func() string {
+			return filepath.Join(config.ProjectConfigDir(cfg.WorkDir), "workflows")
+		},
 	})
 	// program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion())
@@ -968,6 +1072,17 @@ func toolResultText(result *sdk.ToolResultBlockParam) string {
 	return strings.Join(parts, "\n")
 }
 
+
+func workflowSlashAlias(name string) string {
+	name = strings.TrimSpace(strings.ToLower(name))
+	if name == "" {
+		return ""
+	}
+	if strings.HasSuffix(name, "-workflow") {
+		return name
+	}
+	return name + "-workflow"
+}
 func handleWorkflowsCommand(application *app.App) string {
 	if application == nil {
 		return "No workflows loaded."
@@ -977,15 +1092,16 @@ func handleWorkflowsCommand(application *app.App) string {
 		return "No workflows loaded. Place YAML under ~/.solcode/workflows or <project>/.solcode/workflows, or set workflows.paths."
 	}
 	var b strings.Builder
-	b.WriteString("Loaded workflows (explicit invoke via /workflow <name> [args]):\n")
+	b.WriteString("Loaded workflows:\n  /workflow <name> [args]\n  /<name>-workflow [args]  (shortcut for any loaded workflow)\n\n")
 	for _, def := range defs {
 		desc := strings.TrimSpace(def.Description)
 		if desc == "" {
 			desc = "(no description)"
 		}
-		b.WriteString(fmt.Sprintf("  %s — %s\n", def.Name, desc))
+		b.WriteString(fmt.Sprintf("  %s  →  /%s  —  %s\n", def.Name, workflowSlashAlias(def.Name), desc))
 	}
-	b.WriteString("\nWorkflows are not exposed to the model and are blocked in plan mode.")
+	b.WriteString("\nWorkflows are not exposed to the model. Starting a workflow switches permission mode to bypass.")
+	b.WriteString("\nUse /workflow-edit to visually orchestrate and save workflows.")
 	return strings.TrimSpace(b.String())
 }
 

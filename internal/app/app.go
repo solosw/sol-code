@@ -23,6 +23,7 @@ import (
 	"github.com/solosw/solcode/internal/mcp"
 	"github.com/solosw/solcode/internal/memory"
 	"github.com/solosw/solcode/internal/permission"
+	"github.com/solosw/solcode/internal/sandbox"
 	"github.com/solosw/solcode/internal/session"
 	"github.com/solosw/solcode/internal/skill"
 	"github.com/solosw/solcode/internal/tool"
@@ -81,7 +82,7 @@ type options struct {
 func buildToolState(cfg config.Config, mcpFactory mcp.ClientFactory) (*tool.Registry, *skill.Registry, *mcp.Registry, *lsp.Manager, error) {
 	registry := tool.NewRegistry()
 	lspManager := newLSPManager(cfg)
-	registerBuiltins(registry, lspManager)
+	registerBuiltins(registry, lspManager, cfg.Sandbox)
 
 	skillRegistry := loadSkills(cfg)
 	if defs := skillRegistry.All(); len(defs) > 0 {
@@ -2623,10 +2624,10 @@ func newFileChangeRecorder(store *changegraph.Store) func(context.Context, *tool
 	}
 }
 
-func registerBuiltins(registry *tool.Registry, lspManager *lsp.Manager) {
+func registerBuiltins(registry *tool.Registry, lspManager *lsp.Manager, sandboxPolicy sandbox.Policy) {
 	tools := []tool.Tool{
 		tool.NewAskUserTool(),
-		tool.NewBashTool(),
+		tool.NewBashToolWithSandbox(sandboxPolicy),
 		tool.NewDiffTool(),
 		tool.NewEditTool(),
 		tool.NewFetchTool(),
@@ -2687,14 +2688,15 @@ func loadWorkflows(cfg config.Config) *workflow.Registry {
 }
 
 // RunWorkflow executes a named user-authored Task graph explicitly.
-// Workflows are not exposed as model tools and are blocked in plan mode.
+// Workflows are not exposed as model tools. Starting a workflow switches permission mode to bypass.
 // Results are returned as text only; nothing is written to memory.
 func (a *App) RunWorkflow(ctx context.Context, name, args string) (string, error) {
 	if a == nil {
 		return "", fmt.Errorf("app is nil")
 	}
-	if a.Permissions != nil && a.Permissions.Mode() == permission.ModePlan {
-		return "", fmt.Errorf("workflow is not allowed in plan mode; switch permission mode and retry")
+	// Workflows always run with full tool access.
+	if a.Permissions != nil {
+		a.Permissions.SetMode(permission.ModeBypass)
 	}
 	if a.Coordinator == nil {
 		return "", fmt.Errorf("agent coordinator is not configured")
@@ -2746,6 +2748,87 @@ func (a *App) ListWorkflows() []workflow.Definition {
 		return nil
 	}
 	return a.WorkflowRegistry.All()
+}
+
+// ReloadWorkflows reloads workflow definitions from configured paths.
+func (a *App) ReloadWorkflows() {
+	if a == nil {
+		return
+	}
+	a.WorkflowRegistry = loadWorkflows(a.Config)
+}
+
+// SaveWorkflow writes a workflow definition to the user or project workflows directory
+// and reloads the in-memory registry.
+func (a *App) SaveWorkflow(def workflow.Definition, scope workflow.SaveScope) (string, error) {
+	return a.SaveWorkflowWithLayout(def, scope, nil)
+}
+
+// SaveWorkflowWithLayout writes workflow.yaml and optional layout.json for the node editor.
+func (a *App) SaveWorkflowWithLayout(def workflow.Definition, scope workflow.SaveScope, layout *workflow.Layout) (string, error) {
+	if a == nil {
+		return "", fmt.Errorf("app is nil")
+	}
+	dir, err := workflowDirForScope(a.Config, scope)
+	if err != nil {
+		return "", err
+	}
+	path, err := workflow.SaveToDirWithLayout(def, dir, layout)
+	if err != nil {
+		return "", err
+	}
+	a.ReloadWorkflows()
+	return path, nil
+}
+
+// DeleteWorkflow removes a loaded workflow from disk (when under allowed roots)
+// and reloads the registry.
+func (a *App) DeleteWorkflow(name string) error {
+	if a == nil {
+		return fmt.Errorf("app is nil")
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("workflow name is required")
+	}
+	if a.WorkflowRegistry == nil {
+		return fmt.Errorf("no workflows loaded")
+	}
+	def, ok := a.WorkflowRegistry.Find(name)
+	if !ok {
+		return fmt.Errorf("unknown workflow: %s", name)
+	}
+	if err := workflow.Delete(def, workflowDeleteRoots(a.Config)); err != nil {
+		return err
+	}
+	a.ReloadWorkflows()
+	return nil
+}
+
+func workflowDeleteRoots(cfg config.Config) []string {
+	roots := append([]string(nil), cfg.Workflows.Paths...)
+	if user := filepath.Join(config.UserConfigDir(), "workflows"); user != "" {
+		roots = append(roots, user)
+	}
+	if project := config.ProjectConfigDir(cfg.WorkDir); project != "" {
+		roots = append(roots, filepath.Join(project, "workflows"))
+	}
+	return roots
+}
+
+func workflowDirForScope(cfg config.Config, scope workflow.SaveScope) (string, error) {
+	switch scope {
+	case workflow.SaveScopeUser:
+		return filepath.Join(config.UserConfigDir(), "workflows"), nil
+	case workflow.SaveScopeProject:
+		projectDir := config.ProjectConfigDir(cfg.WorkDir)
+		if projectDir == "" {
+			return "", fmt.Errorf("project workflow directory requires work_dir")
+		}
+		return filepath.Join(projectDir, "workflows"), nil
+	default:
+		return "", fmt.Errorf("unknown workflow save scope %q", scope)
+	}
 }
 
 func loadSkills(cfg config.Config) *skill.Registry {

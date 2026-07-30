@@ -11,6 +11,7 @@ import (
 	"github.com/solosw/solcode/internal/anthropic"
 	"github.com/solosw/solcode/internal/hook"
 	"github.com/solosw/solcode/internal/permission"
+	"github.com/solosw/solcode/internal/sandbox"
 )
 
 const (
@@ -133,6 +134,7 @@ type Config struct {
 	Session          SessionConfig        `json:"session,omitempty"`
 	Memory           MemoryConfig         `json:"memory,omitempty"`
 	KnowledgeGraph   KnowledgeGraphConfig `json:"knowledge_graph,omitempty"`
+	Sandbox          sandbox.Policy       `json:"sandbox,omitempty"`
 
 	Provider  string           `json:"provider,omitempty"`
 	Providers []ProviderConfig `json:"providers,omitempty"`
@@ -142,8 +144,8 @@ type Config struct {
 // When Enabled is nil, LSP is on. When IncludeDefaults is nil, built-in
 // language mappings (gopls, pyright, …) are merged if the binary is on PATH.
 type LSPConfig struct {
-	Enabled         *bool            `json:"enabled,omitempty"`
-	IncludeDefaults *bool            `json:"include_defaults,omitempty"`
+	Enabled         *bool             `json:"enabled,omitempty"`
+	IncludeDefaults *bool             `json:"include_defaults,omitempty"`
 	Servers         []LSPServerConfig `json:"servers,omitempty"`
 }
 
@@ -1072,6 +1074,10 @@ func applyJSONConfig(cfg *Config, data []byte) error {
 			}
 		case "memory":
 			if err := json.Unmarshal(value, &cfg.Memory); err != nil {
+				return err
+			}
+		case "sandbox":
+			if err := json.Unmarshal(value, &cfg.Sandbox); err != nil {
 				return err
 			}
 		case "provider":

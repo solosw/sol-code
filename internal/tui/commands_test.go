@@ -43,6 +43,78 @@ func TestSlashAutocompleteIncludesWorkflows(t *testing.T) {
 	}
 }
 
+func TestDirectWorkflowSlashCommand(t *testing.T) {
+	if got := workflowSlashCommand("ppt"); got != "ppt-workflow" {
+		t.Fatalf("workflowSlashCommand(ppt)=%q, want ppt-workflow", got)
+	}
+	if got := workflowSlashCommand("ppt-workflow"); got != "ppt-workflow" {
+		t.Fatalf("workflowSlashCommand(ppt-workflow)=%q, want ppt-workflow", got)
+	}
+
+	m := New(nil)
+	m.SetWorkflowNamesFn(func() []string {
+		return []string{"ppt", "demo-workflow", "test-then-review"}
+	})
+
+	// Any loaded workflow is invokable as /name-workflow.
+	if name, ok := m.resolveDirectWorkflowName("ppt-workflow"); !ok || name != "ppt" {
+		t.Fatalf("resolve ppt-workflow => (%q,%v), want (ppt,true)", name, ok)
+	}
+	if name, ok := m.resolveDirectWorkflowName("demo-workflow"); !ok || name != "demo-workflow" {
+		t.Fatalf("resolve demo-workflow => (%q,%v), want (demo-workflow,true)", name, ok)
+	}
+	if name, ok := m.resolveDirectWorkflowName("test-then-review-workflow"); !ok || name != "test-then-review" {
+		t.Fatalf("resolve test-then-review-workflow => (%q,%v), want (test-then-review,true)", name, ok)
+	}
+	if _, ok := m.resolveDirectWorkflowName("missing-workflow"); ok {
+		t.Fatal("unloaded workflow should not resolve")
+	}
+	if m.isDirectWorkflowCommand("test-then-review") {
+		t.Fatal("slash form without -workflow suffix should not match")
+	}
+
+	// Exact name wins over base name when both exist.
+	m.SetWorkflowNamesFn(func() []string {
+		return []string{"ppt", "ppt-workflow"}
+	})
+	if name, ok := m.resolveDirectWorkflowName("ppt-workflow"); !ok || name != "ppt-workflow" {
+		t.Fatalf("exact match should win, got (%q,%v)", name, ok)
+	}
+
+	m.SetWorkflowNamesFn(func() []string {
+		return []string{"ppt", "test-then-review"}
+	})
+	m.input.SetValue("/ppt")
+	m.updateAutocomplete()
+	if m.autocomplete == nil {
+		t.Fatal("expected autocomplete for /ppt")
+	}
+	joined := strings.Join(m.autocomplete.Items, ",")
+	if !strings.Contains(joined, "ppt-workflow") {
+		t.Fatalf("expected ppt-workflow in autocomplete, got %q", joined)
+	}
+
+	m.input.SetValue("/test")
+	m.updateAutocomplete()
+	if m.autocomplete == nil {
+		t.Fatal("expected autocomplete for /test")
+	}
+	joined = strings.Join(m.autocomplete.Items, ",")
+	if !strings.Contains(joined, "test-then-review-workflow") {
+		t.Fatalf("expected test-then-review-workflow in autocomplete, got %q", joined)
+	}
+	if strings.Contains(","+joined+",", ",test-then-review,") {
+		t.Fatalf("raw workflow name without -workflow must not appear, got %q", joined)
+	}
+}
+
+func TestSlashHelpIncludesDirectWorkflowShortcut(t *testing.T) {
+	help := slashHelpText()
+	if !strings.Contains(help, "/[name]-workflow") {
+		t.Fatalf("expected direct workflow shortcut in help, got %q", help)
+	}
+}
+
 func TestCustomProviderDialogCollectsAllFields(t *testing.T) {
 	var gotKind DialogKind
 	var gotValues []string

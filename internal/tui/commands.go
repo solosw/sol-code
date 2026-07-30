@@ -51,7 +51,10 @@ func slashHelpText() string {
 		"/skills — browse skills and toggle enabled/disabled",
 		"/mcp — browse MCP servers and toggle enabled/disabled",
 		"/workflows — list loaded workflows (explicit Task graphs)",
-		"/workflow <name> [args] — run a workflow by name (not available in plan mode)",
+		"/workflow <name> [args] — run a workflow by name (switches to bypass mode)",
+		"/[name]-workflow [args] — shortcut for any loaded workflow (e.g. ppt → /ppt-workflow)",
+		"/workflow-edit — terminal workflow orchestrator (list/edit tasks)",
+		"/workflow-ui — open Dify-style web node editor (browser)",
 		"/[skill] [args] — invoke a loaded skill by name",
 	}, "\n")
 }
@@ -60,6 +63,29 @@ func (m *Model) handleSlashCommand(input string) (bool, tea.Cmd) {
 	cmd, ok := parseSlashCommand(input)
 	if !ok {
 		return false, nil
+	}
+	// Direct workflow shortcut: /ppt-workflow args → same as /workflow ppt args
+	// (slash command always uses <workflow-name>-workflow; workflow name itself need not include the suffix).
+	if !isBuiltinSlashCommand(cmd.Name) {
+		if workflowName, ok := m.resolveDirectWorkflowName(cmd.Name); ok {
+			m.messages = append(m.messages, ChatMessage{Role: "user", Content: input, TimeStamp: time.Now()})
+			if m.slashAsyncHandler == nil {
+				m.appendCommandResult(fmt.Sprintf("/%s is not available in this session.", cmd.Name))
+				m.status = "Ready"
+				m.refreshViewport()
+				return true, nil
+			}
+			m.permissionMode = "bypass"
+			m.status = fmt.Sprintf("Running workflow %s...", workflowName)
+			m.spinnerActive = true
+			m.loadingStart = time.Now()
+			m.refreshViewport()
+			payload := workflowName
+			if strings.TrimSpace(cmd.Args) != "" {
+				payload = workflowName + " " + strings.TrimSpace(cmd.Args)
+			}
+			return true, tea.Batch(m.slashAsyncHandler("workflow", payload), m.nextSpinnerTick())
+		}
 	}
 	if !isBuiltinSlashCommand(cmd.Name) && m.isSkillName(cmd.Name) {
 		return false, nil
@@ -133,6 +159,14 @@ func (m *Model) handleSlashCommand(input string) (bool, tea.Cmd) {
 		} else {
 			m.appendCommandResult(m.slashHandler(cmd.Name, cmd.Args))
 		}
+	case "workflow-edit":
+		m.ShowWorkflowEditor()
+	case "workflow-ui":
+		if m.workflowUIHandler == nil {
+			m.appendCommandResult("/workflow-ui is not available in this session.")
+		} else {
+			m.appendCommandResult(m.workflowUIHandler())
+		}
 	case "workflow":
 		if m.slashAsyncHandler == nil {
 			m.appendCommandResult("/workflow is not available in this session.")
@@ -140,6 +174,7 @@ func (m *Model) handleSlashCommand(input string) (bool, tea.Cmd) {
 			m.appendCommandResult("Usage: /workflow <name> [args]\nList loaded workflows with /workflows.")
 		} else {
 			name, rest, _ := strings.Cut(strings.TrimSpace(cmd.Args), " ")
+			m.permissionMode = "bypass"
 			m.status = fmt.Sprintf("Running workflow %s...", name)
 			m.spinnerActive = true
 			m.loadingStart = time.Now()
@@ -185,6 +220,73 @@ func (m *Model) isSkillName(name string) bool {
 	return false
 }
 
+const workflowSlashSuffix = "-workflow"
+
+// workflowSlashCommand returns the slash command form for a workflow name.
+// Example: "ppt" → "ppt-workflow"; "ppt-workflow" → "ppt-workflow".
+func workflowSlashCommand(name string) string {
+	name = strings.TrimSpace(strings.ToLower(name))
+	if name == "" {
+		return ""
+	}
+	if strings.HasSuffix(name, workflowSlashSuffix) {
+		return name
+	}
+	return name + workflowSlashSuffix
+}
+
+// resolveDirectWorkflowName maps a slash command like "ppt-workflow" to a loaded
+// workflow name. Prefers an exact name match, then the base name without the
+// "-workflow" suffix (so workflow "ppt" is invoked by /ppt-workflow).
+func (m *Model) resolveDirectWorkflowName(slashName string) (string, bool) {
+	slashName = strings.TrimSpace(strings.ToLower(slashName))
+	if slashName == "" || !strings.HasSuffix(slashName, workflowSlashSuffix) || m.workflowNamesFn == nil {
+		return "", false
+	}
+	names := m.workflowNamesFn()
+	for _, workflowName := range names {
+		if workflowName == slashName {
+			return workflowName, true
+		}
+	}
+	base := strings.TrimSuffix(slashName, workflowSlashSuffix)
+	if base == "" {
+		return "", false
+	}
+	for _, workflowName := range names {
+		if workflowName == base {
+			return workflowName, true
+		}
+	}
+	return "", false
+}
+
+func (m *Model) isDirectWorkflowCommand(name string) bool {
+	_, ok := m.resolveDirectWorkflowName(name)
+	return ok
+}
+
+// directWorkflowSlashCommands lists slash command names for autocomplete.
+func (m *Model) directWorkflowSlashCommands() []string {
+	if m.workflowNamesFn == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := make([]string, 0)
+	for _, name := range m.workflowNamesFn() {
+		cmd := workflowSlashCommand(name)
+		if cmd == "" || isBuiltinSlashCommand(cmd) {
+			continue
+		}
+		if _, ok := seen[cmd]; ok {
+			continue
+		}
+		seen[cmd] = struct{}{}
+		out = append(out, cmd)
+	}
+	return out
+}
+
 func (m *Model) slashSkillPrompt(input string) (string, bool) {
 	cmd, ok := parseSlashCommand(input)
 	if !ok || isBuiltinSlashCommand(cmd.Name) || !m.isSkillName(cmd.Name) {
@@ -197,19 +299,21 @@ func (m *Model) slashSkillPrompt(input string) (string, bool) {
 }
 
 var builtinCommands = map[string]bool{
-	"help":        true,
-	"clear":       true,
-	"model":       true,
-	"provider":    true,
-	"effort":      true,
-	"sessions":    true,
-	"compact":     true,
-	"fix-session": true,
-	"new-session": true,
-	"skills":      true,
-	"mcp":         true,
-	"workflows":   true,
-	"workflow":    true,
+	"help":          true,
+	"clear":         true,
+	"model":         true,
+	"provider":      true,
+	"effort":        true,
+	"sessions":      true,
+	"compact":       true,
+	"fix-session":   true,
+	"new-session":   true,
+	"skills":        true,
+	"mcp":           true,
+	"workflows":     true,
+	"workflow":      true,
+	"workflow-edit": true,
+	"workflow-ui":   true,
 }
 
 func isBuiltinSlashCommand(name string) bool {

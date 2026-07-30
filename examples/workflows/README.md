@@ -1,14 +1,14 @@
 # Workflow examples
 
 Workflows are **user-authored Task graphs** (YAML). They are invoked **explicitly**
-via slash commands — they are **not** exposed to the model as tools, are **blocked
-in plan mode**, and are **not** written into memory.
+via slash commands — they are **not** exposed to the model as tools, switch
+permission mode to **bypass** when started, and are **not** written into memory.
 
 | Concept | Who authors | How it runs |
 |---------|-------------|-------------|
 | **Skill** | Markdown playbook | Model/slash injects text; main agent follows |
 | **Task** | Model (ad-hoc JSON) | Sub-agent DAG right now |
-| **Workflow** | You (YAML on disk) | `/workflow name args` → same Task DAG runner |
+| **Workflow** | You (YAML on disk) | `/workflow name args` or `/<name>-workflow args` → same Task DAG runner |
 
 ## Discovery
 
@@ -46,6 +46,12 @@ Empty `enabled` = all discovered workflows. `disabled` hides names.
 
 - List: `/workflows`
 - Run: `/workflow test-then-review focus on session package`
+- Shortcut: any loaded workflow can be invoked as `/<name>-workflow` (the suffix is only on the command):
+  - workflow name `ppt` → `/ppt-workflow make a deck about X`
+  - same as `/workflow ppt make a deck about X`
+  - if the workflow itself is already named `ppt-workflow`, `/ppt-workflow` still works
+- Terminal editor: `/workflow-edit`
+- Web node editor (Dify-style): `/workflow-ui` — drag nodes, connect ports, save to user/project dirs
 - Args are substituted into prompts as `{{args}}`
 
 ## Authoring

@@ -1,0 +1,18 @@
+func (m *Model) SetModeSwitchFn(modeNames []string, fn func(mode string)) {
+	m.modeNames = modeNames
+	m.permissionMode = modeNames[0]
+	m.modeSwitchFn = fn
+}
+
+func (m Model) handleCtrlC() (tea.Model, tea.Cmd) {
+	if m.streaming {
+		if m.cancelCurrent != nil && !m.canceling {
+			m.cancelCurrent()
+		}
+		m.canceling = true
+		m.status = "Canceling…"
+		m.activeToolName = ""
+		m.refreshViewport()
+		return m, nil
+	}
+	if m.pendingConf !=

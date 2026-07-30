@@ -144,7 +144,7 @@ func TestWorkflowNotRegisteredAsModelTool(t *testing.T) {
 	}
 }
 
-func TestRunWorkflowPlanModeBlocked(t *testing.T) {
+func TestRunWorkflowSwitchesToBypassMode(t *testing.T) {
 	dir := t.TempDir()
 	wfDir := filepath.Join(dir, "workflows")
 	if err := os.MkdirAll(wfDir, 0o755); err != nil {
@@ -175,11 +175,14 @@ tasks:
 	}
 	t.Cleanup(func() { _ = application.Close() })
 
-	// Plan mode must fail before spawn.
+	// Starting a workflow switches permission mode to bypass and keeps it.
 	application.Permissions.SetMode(permission.ModePlan)
 	_, err = application.RunWorkflow(context.Background(), "demo", "")
-	if err == nil || !strings.Contains(err.Error(), "plan mode") {
-		t.Fatalf("expected plan mode error, got %v", err)
+	if err != nil && strings.Contains(err.Error(), "plan mode") {
+		t.Fatalf("workflow should not be blocked by plan mode, got %v", err)
+	}
+	if got := application.Permissions.Mode(); got != permission.ModeBypass {
+		t.Fatalf("expected permission mode bypass after workflow, got %s", got)
 	}
 }
 

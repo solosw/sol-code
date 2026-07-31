@@ -38,9 +38,14 @@ type Usage struct {
 	MaxContextTokens         int64
 }
 
+// MessageClient is the subset of anthropic.Client used by the engine loop.
+type MessageClient interface {
+	Create(ctx context.Context, req cpanthropic.MessageRequest) (*sdk.Message, error)
+}
+
 type Config struct {
 	Model            Model
-	Client           *cpanthropic.Client
+	Client           MessageClient
 	Hooks            *hook.Runtime
 	Tools            *tool.Registry
 	Permissions      *permission.Service
@@ -67,6 +72,9 @@ type Config struct {
 	OnAskUser        func(ctx context.Context, params tool.AskUserParams) (map[string]string, error)
 	QueuedPrompts    func() []string
 	RecordFileChange func(ctx context.Context, uctx *tool.UseContext, change tool.FileChange)
+	// CompactMessages is invoked mid-run when estimated context reaches MaxContextTokens (100%).
+	// It must return a shorter message list. Nil disables mid-run compaction.
+	CompactMessages func(ctx context.Context, messages []sdk.MessageParam) ([]sdk.MessageParam, error)
 }
 
 type Engine struct {
@@ -228,6 +236,47 @@ func (e *Engine) runMessagesLoop(ctx context.Context, runReq RunRequest) RunResu
 			req.OnThinkingDelta = e.config.OnThinkingDelta
 		}
 
+		// Mid-run guard: if composed context already fills the window, compact
+		// before Create so the request does not fail with a context-length error.
+		if e.config.MaxContextTokens > 0 && e.config.CompactMessages != nil {
+			est := builder.EstimateContextTokens(BuildRequest{
+				Model:            modelName,
+				ProjectKnowledge: runReq.ProjectKnowledge,
+				MaxTokens:        e.config.MaxTokens,
+				WorkDir:          cfg.WorkDir,
+				Messages:         messages,
+				Tools:            tools,
+				Thinking:         e.config.Thinking,
+				ThinkingText:     e.config.ThinkingText,
+				Effort:           e.config.Effort,
+				Stream:           e.config.Stream,
+				SessionSummary:   runReq.SessionSummary,
+				MemoryContext:    runReq.MemoryContext,
+			})
+			if est >= e.config.MaxContextTokens {
+				compacted, cerr := e.config.CompactMessages(ctx, messages)
+				if cerr != nil {
+					return RunResult{AgentResult: agent.AgentResult{AgentID: cfg.ID, Error: fmt.Sprintf("context full (%d/%d tokens) and compaction failed: %v", est, e.config.MaxContextTokens, cerr)}, Messages: messages}
+				}
+				if len(compacted) > 0 {
+					messages = compacted
+					req = builder.Build(BuildRequest{
+						Model:            modelName,
+						ProjectKnowledge: runReq.ProjectKnowledge,
+						MaxTokens:        e.config.MaxTokens,
+						WorkDir:          cfg.WorkDir,
+						Messages:         messages,
+						Tools:            tools,
+						Thinking:         e.config.Thinking,
+						ThinkingText:     e.config.ThinkingText,
+						Effort:           e.config.Effort,
+						Stream:           e.config.Stream,
+						SessionSummary:   runReq.SessionSummary,
+						MemoryContext:    runReq.MemoryContext,
+					})
+				}
+			}
+		}
 		message, err := e.config.Client.Create(ctx, req)
 		if err != nil {
 			return RunResult{AgentResult: agent.AgentResult{AgentID: cfg.ID, Error: err.Error()}, Messages: messages}

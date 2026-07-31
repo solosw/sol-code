@@ -501,6 +501,44 @@ func TestSanitizeLoadedSessionSummaryRemovesPlaceholderOutline(t *testing.T) {
 	}
 }
 
+func TestOrdinaryTurnsDoNotInjectDynamicMemoryContext(t *testing.T) {
+	cfg := config.Default()
+	cfg.KnowledgeGraph.Enabled = true
+	dir := t.TempDir()
+	store, err := changegraph.Open(filepath.Join(dir, "knowledge.db"))
+	if err != nil {
+		t.Fatalf("Open() = %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	application := &App{Config: cfg, ChangeGraph: store}
+	current := session.NewSession("main", dir, cfg.Model)
+	current.Summary = "legacy summary should not be injected before compaction"
+	allowed := true
+	current.Metadata.CrossSessionMemory = &allowed
+	current.Metadata.MemoryBootstrapPending = true
+	current.Append(
+		sdk.NewUserMessage(sdk.NewTextBlock("normal chat")),
+		sdk.NewAssistantMessage(sdk.NewTextBlock("normal reply")),
+	)
+
+	if got := sessionSummaryForRequest(current); got != "" {
+		t.Fatalf("sessionSummaryForRequest() = %q, want empty on ordinary turns", got)
+	}
+	if got := application.projectKnowledgeForRequest(context.Background(), current, "continue"); got != "" {
+		t.Fatalf("projectKnowledgeForRequest() = %q, want empty on ordinary turns", got)
+	}
+	items, err := application.retrieveNewSessionMemoryContext(context.Background(), "continue", current, true)
+	if err != nil {
+		t.Fatalf("retrieveNewSessionMemoryContext() = %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("retrieveNewSessionMemoryContext() = %#v, want no injection on ordinary turns", items)
+	}
+	if current.Metadata.MemoryBootstrapPending {
+		t.Fatal("expected legacy MemoryBootstrapPending flag to be cleared")
+	}
+}
+
 func TestNewSessionMemoryRetrievalGate(t *testing.T) {
 	current := session.NewSession("named", t.TempDir(), "test-model")
 	allowed := true

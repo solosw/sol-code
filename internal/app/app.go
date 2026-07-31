@@ -655,22 +655,17 @@ func activeTodos(path string) []tool.TodoItem {
 	return out
 }
 
-// retrieveNewSessionMemoryContext injects retrieved memory only once when a
-// newly opened session explicitly opted into cross-session memory. Continuing
-// sessions rely on their compact summary and the durable project graph instead.
+// retrieveNewSessionMemoryContext no longer injects retrieved memory into
+// ordinary turns. Memory-related context enters the model only via durable
+// compaction messages (session summary / project knowledge) after context
+// has been compacted. Cross-session recall remains available through the
+// ReadMemory tool and post-compact durable context.
 func (a *App) retrieveNewSessionMemoryContext(ctx context.Context, prompt string, current *session.Session, newSession bool) ([]engine.ContextItem, error) {
-	if a == nil || a.MemoryManager == nil || !a.Config.Memory.Enabled || !shouldRetrieveNewSessionMemory(current, newSession) {
-		return nil, nil
+	if current != nil && current.Metadata.MemoryBootstrapPending {
+		// Clear the legacy one-shot flag so it cannot re-arm older sessions.
+		current.Metadata.MemoryBootstrapPending = false
 	}
-	if current == nil {
-		return nil, nil
-	}
-	selected, err := a.MemoryManager.Retrieve(ctx, prompt, string(current.Metadata.ID), true, 0)
-	if err != nil {
-		return nil, err
-	}
-	current.Metadata.MemoryBootstrapPending = false
-	return a.memoryContextFromItems(ctx, selected), nil
+	return nil, nil
 }
 
 func (a *App) memoryContextFromItems(_ context.Context, items []memory.Item) []engine.ContextItem {
@@ -922,23 +917,20 @@ func (a *App) estimateSessionContextTokens(ctx context.Context, current *session
 	}))
 }
 
-// sessionSummaryForRequest injects the legacy Summary field only for sessions
-// without its durable compacted-summary user message. This keeps old sessions
-// compatible while preventing the same summary from being sent twice.
+// sessionSummaryForRequest never injects summary into ordinary turns.
+// After compaction, the summary already lives as a durable leading user
+// message (Compacted session summary:). Pre-compact chat stays pure so
+// prompt-cache prefixes are not rewritten every request.
 func sessionSummaryForRequest(current *session.Session) string {
-	if current == nil || current.HasCompactedSummaryMessage() {
-		return ""
-	}
-	return sanitizeLoadedSessionSummary(current.Summary)
+	return ""
 }
 
-// projectKnowledgeForRequest injects dynamic project knowledge only until it
-// has been captured by compaction as a durable leading user message.
+// projectKnowledgeForRequest never injects project knowledge into ordinary
+// turns. Compaction captures the current graph/todos into a durable leading
+// user message (Compacted project knowledge:); until then, normal dialogue
+// does not carry this dynamic memory context.
 func (a *App) projectKnowledgeForRequest(ctx context.Context, current *session.Session, prompt string) string {
-	if current == nil || current.HasCompactedProjectKnowledgeMessage() {
-		return ""
-	}
-	return a.projectKnowledgeContext(ctx, current, prompt)
+	return ""
 }
 
 func persistCompactedContext(current *session.Session, summary, projectKnowledge string) {

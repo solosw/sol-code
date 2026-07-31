@@ -260,19 +260,19 @@ func (e *Engine) runMessagesLoop(ctx context.Context, runReq RunRequest) RunResu
 				}
 				if len(compacted) > 0 {
 					messages = compacted
+					// Compaction already materializes durable summary /
+					// project-knowledge messages. Do not re-inject the
+					// pre-compact ephemeral fields on top of them.
 					req = builder.Build(BuildRequest{
-						Model:            modelName,
-						ProjectKnowledge: runReq.ProjectKnowledge,
-						MaxTokens:        e.config.MaxTokens,
-						WorkDir:          cfg.WorkDir,
-						Messages:         messages,
-						Tools:            tools,
-						Thinking:         e.config.Thinking,
-						ThinkingText:     e.config.ThinkingText,
-						Effort:           e.config.Effort,
-						Stream:           e.config.Stream,
-						SessionSummary:   runReq.SessionSummary,
-						MemoryContext:    runReq.MemoryContext,
+						Model:        modelName,
+						MaxTokens:    e.config.MaxTokens,
+						WorkDir:      cfg.WorkDir,
+						Messages:     messages,
+						Tools:        tools,
+						Thinking:     e.config.Thinking,
+						ThinkingText: e.config.ThinkingText,
+						Effort:       e.config.Effort,
+						Stream:       e.config.Stream,
 					})
 				}
 			}

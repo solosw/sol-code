@@ -60,11 +60,12 @@ func (b ContextBuilder) Build(req BuildRequest) cpanthropic.MessageRequest {
 	}
 }
 
-// withContextMessages injects session summary and retrieved memory as an
-// ephemeral user message immediately before the latest user prompt when one is
-// present. They stay in the messages stream rather than in the system prompt,
-// and placing them before the newest prompt avoids letting dynamic memory
-// override the user's latest request.
+// withContextMessages optionally injects session summary / retrieved memory /
+// project knowledge as an ephemeral user message immediately before the
+// latest user prompt. Callers should leave these empty for ordinary turns;
+// memory-related context is expected to enter via durable compaction
+// messages instead. When provided, they stay in the messages stream rather
+// than the system prompt so the stable system prefix is not rewritten.
 func (b ContextBuilder) withContextMessages(messages []sdk.MessageParam, sessionSummary string, memoryContext []ContextItem, projectKnowledge string) []sdk.MessageParam {
 	contextBlock := b.contextBlock(sessionSummary, memoryContext, projectKnowledge)
 	if contextBlock == "" {

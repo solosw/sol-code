@@ -3,6 +3,9 @@ package anthropic
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strings"
+	"time"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
@@ -11,20 +14,35 @@ import (
 const DefaultModel = "claude-opus-4-8"
 const DefaultMaxRetries = 5
 
-// Options configures the Anthropic API client wrapper.
+// Wire formats for outbound chat requests.
+const (
+	// FormatAnthropic sends native Anthropic Messages API requests (default).
+	FormatAnthropic = "anthropic"
+	// FormatOpenAI sends OpenAI chat/completions-compatible requests to
+	// {base_url}/chat/completions. Internal engine types stay Anthropic SDK shaped.
+	FormatOpenAI = "openai"
+)
+
+// Options configures the API client wrapper.
 type Options struct {
 	APIKey  string
 	BaseURL string
+	// Format selects the outbound protocol. Empty defaults to anthropic.
+	Format string
 }
 
-// Client is a thin wrapper around the official Anthropic Go SDK. It keeps the
-// rest of solcode from depending on SDK construction details while still
-// preserving SDK message/content types for safe multi-turn tool-use replay.
+// Client is a thin wrapper around the official Anthropic Go SDK, with an optional
+// OpenAI chat/completions transport for compatible gateways.
 type Client struct {
-	sdk sdk.Client
+	sdk     sdk.Client
+	format  string
+	apiKey  string
+	baseURL string
+	http    *http.Client
 }
 
 func NewClient(opts Options) *Client {
+	format := NormalizeFormat(opts.Format)
 	requestOptions := make([]option.RequestOption, 0, 3)
 	requestOptions = append(requestOptions, option.WithMaxRetries(DefaultMaxRetries))
 	if opts.APIKey != "" {
@@ -33,7 +51,30 @@ func NewClient(opts Options) *Client {
 	if opts.BaseURL != "" {
 		requestOptions = append(requestOptions, option.WithBaseURL(opts.BaseURL))
 	}
-	return &Client{sdk: sdk.NewClient(requestOptions...)}
+	return &Client{
+		sdk:     sdk.NewClient(requestOptions...),
+		format:  format,
+		apiKey:  opts.APIKey,
+		baseURL: strings.TrimRight(strings.TrimSpace(opts.BaseURL), "/"),
+		http:    &http.Client{Timeout: 0}, // stream can be long-lived
+	}
+}
+
+// NormalizeFormat returns a supported wire format; unknown values fall back to anthropic.
+func NormalizeFormat(format string) string {
+	switch strings.ToLower(strings.TrimSpace(format)) {
+	case FormatOpenAI, "chat", "chat_completions", "chat-completions":
+		return FormatOpenAI
+	default:
+		return FormatAnthropic
+	}
+}
+
+func (c *Client) Format() string {
+	if c == nil {
+		return FormatAnthropic
+	}
+	return NormalizeFormat(c.format)
 }
 
 func (c *Client) SDK() *sdk.Client {
@@ -43,12 +84,16 @@ func (c *Client) SDK() *sdk.Client {
 	return &c.sdk
 }
 
-// Create sends one Messages API request. When Stream is true, it uses the SDK's
-// streaming API and accumulates the final Message so callers can continue the
-// conversation without losing tool_use/thinking blocks.
+// Create sends one chat request. When Format is openai, it uses OpenAI
+// chat/completions at {base_url}/chat/completions and maps the response back
+// into an Anthropic sdk.Message. When Stream is true, deltas are delivered via
+// OnTextDelta / OnThinkingDelta callbacks.
 func (c *Client) Create(ctx context.Context, req MessageRequest) (*sdk.Message, error) {
 	if c == nil {
 		return nil, fmt.Errorf("anthropic client is nil")
+	}
+	if c.Format() == FormatOpenAI {
+		return c.createOpenAI(ctx, req)
 	}
 	params := req.ToSDKParams()
 	if !req.Stream {
@@ -68,4 +113,12 @@ func (c *Client) Create(ctx context.Context, req MessageRequest) (*sdk.Message, 
 		return nil, err
 	}
 	return &message, nil
+}
+
+// idleHTTPTimeout is only used for non-stream OpenAI requests.
+func (c *Client) idleHTTPClient() *http.Client {
+	if c == nil || c.http == nil {
+		return &http.Client{Timeout: 10 * time.Minute}
+	}
+	return &http.Client{Timeout: 10 * time.Minute, Transport: c.http.Transport}
 }

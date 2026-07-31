@@ -111,6 +111,10 @@ func DefaultKnowledgeGraphPath(workDir string) string {
 type Config struct {
 	APIKey           string               `json:"api_key"`
 	BaseURL          string               `json:"base_url"`
+	// APIFormat selects the outbound chat protocol: "anthropic" (default) or "openai".
+	// OpenAI mode POSTs to {base_url}/chat/completions while keeping internal
+	// Anthropic message/tool types for the engine/session stack.
+	APIFormat        string               `json:"api_format,omitempty"`
 	Model            string               `json:"model"`
 	FastModel        string               `json:"fast_model,omitempty"`
 	MaxContextTokens int64                `json:"max_context_tokens,omitempty"`
@@ -240,13 +244,16 @@ type ProviderConfig struct {
 	APIKeyEnv  string        `json:"api_key_env,omitempty"`
 	BaseURL    string        `json:"base_url,omitempty"`
 	BaseURLEnv string        `json:"base_url_env,omitempty"`
+	// APIFormat overrides Config.APIFormat for this provider when set.
+	APIFormat  string        `json:"api_format,omitempty"`
 	Models     []ModelConfig `json:"models"`
 }
 
 type ResolvedProvider struct {
-	Name    string
-	APIKey  string
-	BaseURL string
+	Name      string
+	APIKey    string
+	BaseURL   string
+	APIFormat string
 }
 
 type ModelConfig struct {
@@ -397,6 +404,7 @@ func defaultSettingsPayload(workDir string) map[string]any {
 }
 
 func (cfg *Config) Normalize() error {
+	cfg.APIFormat = anthropic.NormalizeFormat(cfg.APIFormat)
 	cfg.PermissionMode = permission.NormalizeMode(cfg.PermissionMode)
 	cfg.Permissions.Mode = permission.NormalizeMode(cfg.Permissions.Mode)
 	if cfg.Permissions.Mode == "" {
@@ -463,6 +471,11 @@ func (cfg *Config) Normalize() error {
 
 	cfg.APIKey = prov.APIKey
 	cfg.BaseURL = prov.BaseURL
+	if strings.TrimSpace(prov.APIFormat) != "" {
+		cfg.APIFormat = anthropic.NormalizeFormat(prov.APIFormat)
+	} else {
+		cfg.APIFormat = anthropic.NormalizeFormat(cfg.APIFormat)
+	}
 	cfg.Model = mdl.ID
 	if mdl.MaxContextTokens > 0 {
 		cfg.MaxContextTokens = mdl.MaxContextTokens
@@ -603,7 +616,7 @@ func (cfg Config) resolveActive() (ResolvedProvider, ModelConfig, error) {
 		found := false
 		for _, p := range cfg.Providers {
 			if p.Name == cfg.Provider {
-				prov = ResolvedProvider{Name: p.Name, APIKey: p.APIKey, BaseURL: p.BaseURL}
+				prov = ResolvedProvider{Name: p.Name, APIKey: p.APIKey, BaseURL: p.BaseURL, APIFormat: p.APIFormat}
 				found = true
 				break
 			}
@@ -619,7 +632,7 @@ func (cfg Config) resolveActive() (ResolvedProvider, ModelConfig, error) {
 		if len(candidates) == 0 {
 			for _, p := range cfg.Providers {
 				if len(p.Models) > 0 {
-					candidates = []ResolvedProvider{{Name: p.Name, APIKey: p.APIKey, BaseURL: p.BaseURL}}
+					candidates = []ResolvedProvider{{Name: p.Name, APIKey: p.APIKey, BaseURL: p.BaseURL, APIFormat: p.APIFormat}}
 					break
 				}
 			}
@@ -670,7 +683,7 @@ func collectProvidersForModel(providers []ProviderConfig, model string) []Resolv
 	for _, p := range providers {
 		for _, m := range p.Models {
 			if m.Name == model || m.ID == model {
-				out = append(out, ResolvedProvider{Name: p.Name, APIKey: p.APIKey, BaseURL: p.BaseURL})
+				out = append(out, ResolvedProvider{Name: p.Name, APIKey: p.APIKey, BaseURL: p.BaseURL, APIFormat: p.APIFormat})
 				break
 			}
 		}
@@ -683,7 +696,7 @@ func collectDefaultProviders(providers []ProviderConfig) []ResolvedProvider {
 	for _, p := range providers {
 		for _, m := range p.Models {
 			if m.Default {
-				out = append(out, ResolvedProvider{Name: p.Name, APIKey: p.APIKey, BaseURL: p.BaseURL})
+				out = append(out, ResolvedProvider{Name: p.Name, APIKey: p.APIKey, BaseURL: p.BaseURL, APIFormat: p.APIFormat})
 				break
 			}
 		}

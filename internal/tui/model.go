@@ -1090,8 +1090,13 @@ func (m Model) handleCustomDialogKey(msg tea.KeyMsg, key string) (tea.Model, tea
 		m.status = "Ready"
 	case "enter":
 		value := strings.TrimSpace(dialog.CustomInput.Value())
+		// API protocol is optional: empty means anthropic (default).
 		if value == "" {
-			return m, nil
+			if dialog.Active == DialogProvider && dialog.CustomStep == 3 {
+				value = "anthropic"
+			} else {
+				return m, nil
+			}
 		}
 		dialog.CustomValues = append(dialog.CustomValues, value)
 		dialog.CustomInput.Reset()
@@ -1124,7 +1129,7 @@ func (m Model) handleCustomDialogKey(msg tea.KeyMsg, key string) (tea.Model, tea
 
 func customDialogFieldCount(kind DialogKind) int {
 	if kind == DialogProvider {
-		return 3
+		return 4
 	}
 	return 1
 }
@@ -1136,8 +1141,10 @@ func customDialogFieldPlaceholder(kind DialogKind, step int) string {
 			return "Provider name"
 		case 1:
 			return "API key"
-		default:
+		case 2:
 			return "Base URL"
+		default:
+			return "API protocol: anthropic or openai (default anthropic)"
 		}
 	}
 	return "Model ID"
@@ -2110,8 +2117,10 @@ func customDialogFieldLabel(kind DialogKind, step int) string {
 			return "Provider name"
 		case 1:
 			return "API key"
-		default:
+		case 2:
 			return "Base URL"
+		default:
+			return "API protocol (anthropic or openai)"
 		}
 	}
 	return "Model ID"

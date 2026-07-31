@@ -15,6 +15,7 @@ import (
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/solosw/solcode/internal/agent"
+	cpanthropic "github.com/solosw/solcode/internal/anthropic"
 	"github.com/solosw/solcode/internal/app"
 	"github.com/solosw/solcode/internal/config"
 	"github.com/solosw/solcode/internal/engine"
@@ -453,7 +454,17 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 			providers := make([]tui.DialogItem, 0, len(cfg.Providers))
 			for _, p := range cfg.Providers {
 				current := cfg.Provider == p.Name
+				format := p.APIFormat
+				if strings.TrimSpace(format) == "" {
+					format = cfg.APIFormat
+				}
+				format = cpanthropic.NormalizeFormat(format)
 				subtitle := p.BaseURL
+				if subtitle == "" {
+					subtitle = format
+				} else {
+					subtitle = fmt.Sprintf("%s · %s", subtitle, format)
+				}
 				providers = append(providers, tui.DialogItem{
 					Label:    p.Name,
 					Subtitle: subtitle,
@@ -666,14 +677,27 @@ func handleProviderSwitch(cfg *config.Config, application *app.App, providerName
 }
 
 func handleCustomProvider(cfg *config.Config, application *app.App, values []string, persistencePath, configPath string) tui.SelectResult {
-	if len(values) != 3 {
-		return tui.SelectResult{Message: "Could not add custom provider: provider name, API key, and base URL are required."}
+	// values: name, api key, base URL, optional API protocol (anthropic|openai)
+	if len(values) < 3 || len(values) > 4 {
+		return tui.SelectResult{Message: "Could not add custom provider: provider name, API key, base URL, and API protocol are required."}
 	}
 	name := strings.TrimSpace(values[0])
 	apiKey := strings.TrimSpace(values[1])
 	baseURL := strings.TrimSpace(values[2])
+	apiFormat := cpanthropic.FormatAnthropic
+	if len(values) == 4 {
+		apiFormat = cpanthropic.NormalizeFormat(values[3])
+	}
 	if name == "" || apiKey == "" || baseURL == "" {
 		return tui.SelectResult{Message: "Could not add custom provider: provider name, API key, and base URL are required."}
+	}
+	if len(values) == 4 {
+		raw := strings.ToLower(strings.TrimSpace(values[3]))
+		switch raw {
+		case "", cpanthropic.FormatAnthropic, cpanthropic.FormatOpenAI, "chat", "chat_completions", "chat-completions":
+		default:
+			return tui.SelectResult{Message: "Could not add custom provider: API protocol must be \"anthropic\" or \"openai\"."}
+		}
 	}
 	for _, provider := range cfg.Providers {
 		if provider.Name == name {
@@ -683,10 +707,11 @@ func handleCustomProvider(cfg *config.Config, application *app.App, values []str
 
 	next := *cfg
 	next.Providers = append(append([]config.ProviderConfig(nil), cfg.Providers...), config.ProviderConfig{
-		Name:    name,
-		APIKey:  apiKey,
-		BaseURL: baseURL,
-		Models:  []config.ModelConfig{},
+		Name:      name,
+		APIKey:    apiKey,
+		BaseURL:   baseURL,
+		APIFormat: apiFormat,
+		Models:    []config.ModelConfig{},
 	})
 	if err := next.Normalize(); err != nil {
 		return tui.SelectResult{Message: fmt.Sprintf("Could not add custom provider %q: %v", name, err)}
@@ -699,7 +724,7 @@ func handleCustomProvider(cfg *config.Config, application *app.App, values []str
 		return tui.SelectResult{Message: fmt.Sprintf("Could not reload custom provider %q: %v", name, err)}
 	}
 	*cfg = loaded
-	return tui.SelectResult{Message: fmt.Sprintf("Added custom provider %s and reloaded settings. Add a model for it with /model.", name)}
+	return tui.SelectResult{Message: fmt.Sprintf("Added custom provider %s (%s) and reloaded settings. Add a model for it with /model.", name, apiFormat)}
 }
 
 func handleCustomModel(cfg *config.Config, application *app.App, values []string, persistencePath, configPath string) tui.SelectResult {

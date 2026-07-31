@@ -171,6 +171,7 @@ func New(cfg config.Config, opts ...Option) (*App, error) {
 	client := cpanthropic.NewClient(cpanthropic.Options{
 		APIKey:  cfg.APIKey,
 		BaseURL: cfg.BaseURL,
+		Format:  cfg.APIFormat,
 	})
 
 	recordFileChange := newFileChangeRecorder(graphStore)
@@ -322,8 +323,8 @@ func (a *App) SwitchModel(cfg config.Config) error {
 		return fmt.Errorf("app is nil")
 	}
 	client := a.Client
-	if cfg.APIKey != a.Config.APIKey || cfg.BaseURL != a.Config.BaseURL {
-		client = cpanthropic.NewClient(cpanthropic.Options{APIKey: cfg.APIKey, BaseURL: cfg.BaseURL})
+	if cfg.APIKey != a.Config.APIKey || cfg.BaseURL != a.Config.BaseURL || cpanthropic.NormalizeFormat(cfg.APIFormat) != a.Client.Format() {
+		client = cpanthropic.NewClient(cpanthropic.Options{APIKey: cfg.APIKey, BaseURL: cfg.BaseURL, Format: cfg.APIFormat})
 	}
 	a.Config = cfg
 	a.Client = client

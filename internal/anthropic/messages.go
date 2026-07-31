@@ -31,14 +31,25 @@ func (r MessageRequest) ToSDKParams() sdk.MessageNewParams {
 	if maxTokens <= 0 {
 		maxTokens = 16_000
 	}
+	// Prompt caching is opt-in on the Anthropic Messages API. Many OpenAI-compatible
+	// gateways inject cache markers during conversion; the native path must set them
+	// itself or cache_creation/cache_read stay 0 even with a stable prefix.
+	//
+	// Use both:
+	//  1) explicit breakpoints on the stable tools+system prefix (what converters usually add)
+	//  2) top-level automatic caching so multi-turn history can advance the breakpoint
 	params := sdk.MessageNewParams{
-		Model:     sdk.Model(model),
-		MaxTokens: maxTokens,
-		Messages:  r.Messages,
-		Tools:     r.Tools,
+		Model:        sdk.Model(model),
+		MaxTokens:    maxTokens,
+		Messages:     r.Messages,
+		Tools:        withLastToolCacheBreakpoint(r.Tools),
+		CacheControl: ephemeralCacheControl(),
 	}
 	if r.System != "" {
-		params.System = []sdk.TextBlockParam{{Text: r.System}}
+		params.System = []sdk.TextBlockParam{{
+			Text:         r.System,
+			CacheControl: ephemeralCacheControl(),
+		}}
 	}
 	if r.Thinking {
 		adaptive := sdk.ThinkingConfigAdaptiveParam{}
@@ -51,6 +62,33 @@ func (r MessageRequest) ToSDKParams() sdk.MessageNewParams {
 		params.OutputConfig = sdk.OutputConfigParam{Effort: sdk.OutputConfigEffort(r.Effort)}
 	}
 	return params
+}
+
+
+func ephemeralCacheControl() sdk.CacheControlEphemeralParam {
+	// 1h keeps tools/system warm across normal turn gaps; default 5m expires too easily.
+	ctrl := sdk.NewCacheControlEphemeralParam()
+	ctrl.TTL = sdk.CacheControlEphemeralTTLTTL1h
+	return ctrl
+}
+
+// withLastToolCacheBreakpoint clones tools and marks the last custom tool so the
+// entire tools array is part of a reusable cached prefix (tools render before system).
+func withLastToolCacheBreakpoint(tools []sdk.ToolUnionParam) []sdk.ToolUnionParam {
+	if len(tools) == 0 {
+		return tools
+	}
+	out := append([]sdk.ToolUnionParam(nil), tools...)
+	for i := len(out) - 1; i >= 0; i-- {
+		if out[i].OfTool == nil {
+			continue
+		}
+		copied := *out[i].OfTool
+		copied.CacheControl = ephemeralCacheControl()
+		out[i].OfTool = &copied
+		break
+	}
+	return out
 }
 
 func ToolToSDK(t ToolLike) sdk.ToolUnionParam {

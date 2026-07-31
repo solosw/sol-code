@@ -127,7 +127,7 @@ func TestCustomProviderDialogCollectsAllFields(t *testing.T) {
 	m.dialog = &DialogState{Active: DialogProvider}
 	m.startCustomDialog()
 
-	for _, value := range []string{"openrouter", "sk-test", "https://example.test/v1"} {
+	for _, value := range []string{"openrouter", "sk-test", "https://example.test/v1", "openai"} {
 		m.dialog.CustomInput.SetValue(value)
 		updated, _ := m.Update(parseKeyMsg("enter"))
 		m = updated.(Model)
@@ -136,12 +136,34 @@ func TestCustomProviderDialogCollectsAllFields(t *testing.T) {
 	if gotKind != DialogProvider {
 		t.Fatalf("custom dialog kind = %v, want provider", gotKind)
 	}
-	want := []string{"openrouter", "sk-test", "https://example.test/v1"}
+	want := []string{"openrouter", "sk-test", "https://example.test/v1", "openai"}
 	if strings.Join(gotValues, "|") != strings.Join(want, "|") {
 		t.Fatalf("custom provider values = %#v, want %#v", gotValues, want)
 	}
 	if m.dialog != nil {
 		t.Fatal("expected dialog to close after custom provider submission")
+	}
+}
+
+func TestCustomProviderDialogDefaultsAPIProtocol(t *testing.T) {
+	var gotValues []string
+	m := New(nil)
+	m.SetCustomDialogCallback(func(kind DialogKind, values []string) SelectResult {
+		gotValues = append([]string(nil), values...)
+		return SelectResult{Message: "saved"}
+	})
+	m.dialog = &DialogState{Active: DialogProvider}
+	m.startCustomDialog()
+
+	for _, value := range []string{"openrouter", "sk-test", "https://example.test/v1", ""} {
+		m.dialog.CustomInput.SetValue(value)
+		updated, _ := m.Update(parseKeyMsg("enter"))
+		m = updated.(Model)
+	}
+
+	want := []string{"openrouter", "sk-test", "https://example.test/v1", "anthropic"}
+	if strings.Join(gotValues, "|") != strings.Join(want, "|") {
+		t.Fatalf("custom provider values = %#v, want %#v", gotValues, want)
 	}
 }
 

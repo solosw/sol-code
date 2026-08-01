@@ -194,7 +194,8 @@ func (e *Engine) runMessagesLoop(ctx context.Context, runReq RunRequest) RunResu
 		turnLimit = 10000
 	}
 
-	tools := e.selectedTools(cfg.AllowedTools)
+	allTools := e.selectedTools(cfg.AllowedTools)
+	enabledTools := make(map[string]bool)
 	executor := NewToolExecutorWithPermissions(e.config.Tools, e.config.Hooks, e.config.Permissions)
 	builder := ContextBuilder{
 		SystemPrompt: e.config.SystemPrompt,
@@ -217,6 +218,10 @@ func (e *Engine) runMessagesLoop(ctx context.Context, runReq RunRequest) RunResu
 		if modelName == "" {
 			modelName = e.config.ModelName
 		}
+		// Compact schemas each turn: full registry stays available to the
+		// executor and ToolSearch, while only core + sticky + live matches
+		// are sent to the model.
+		tools := SelectToolsForTurn(allTools, cfg.AllowedTools, selectionQuery(prompt, ""), enabledTools)
 		req := builder.Build(BuildRequest{
 			Model:            modelName,
 			ProjectKnowledge: runReq.ProjectKnowledge,
@@ -358,6 +363,15 @@ func (e *Engine) runMessagesLoop(ctx context.Context, runReq RunRequest) RunResu
 					if root := e.config.SkillRootsByName[name]; root != "" {
 						activeSkillRoot = root
 					}
+				}
+			}
+			// Keep tools the model actually used (and ToolSearch hits) sticky so
+			// subsequent turns retain their schemas without re-sending the full
+			// MCP inventory.
+			if !toolResult.IsError {
+				enabledTools[use.Name] = true
+				if use.Name == tool.ToolSearchToolName {
+					enableToolsFromSearch(allTools, input, enabledTools)
 				}
 			}
 			apiResult := toolResultToAPI(use.ID, toolResult)

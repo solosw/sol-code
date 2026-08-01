@@ -403,7 +403,9 @@ func toolUsagePrompt() string {
 		"Tool usage:",
 		"- Use the available tools when they are the most direct way to gather information, inspect code, make changes, or verify behavior.",
 		"- Match the tool input schema exactly and prefer the smallest tool call that completes the task.",
-		"- When a reusable workflow matches the task, use the Skill tool before continuing with other tools.",
+		"- Only a compact core of tools is listed each turn. Additional MCP tools and less common builtins stay in a live registry and are not all sent as schemas.",
+		"- When you need a capability that is not currently listed, call ToolSearch with a short capability query. Matching tools are enabled on the next turn.",
+		"- When a reusable workflow matches the task, use the Skill tool before continuing with other tools. Skill names may also be found via ToolSearch.",
 	}, "\n")
 }
 

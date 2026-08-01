@@ -88,6 +88,9 @@ func buildToolState(cfg config.Config, mcpFactory mcp.ClientFactory) (*tool.Regi
 	if defs := skillRegistry.All(); len(defs) > 0 {
 		registry.Register(tool.NewSkillTool(skillRegistry))
 	}
+	// ToolSearch queries live registries at invocation time, so dynamic MCP and
+	// Skill capabilities remain discoverable without all schemas being sent.
+	registry.Register(tool.NewToolSearchTool(registry, skillRegistry))
 
 	mcpRegistry := mcp.NewRegistry(cfg.MCP.Servers)
 	if mcpFactory != nil {
@@ -901,7 +904,9 @@ func (a *App) estimateSessionContextTokens(ctx context.Context, current *session
 	}
 	tools := []tool.Tool(nil)
 	if a.Tools != nil {
-		tools = a.Tools.All()
+		// Estimate with the compact dynamic set so the status bar matches
+		// what the next model request will actually send.
+		tools = engine.SelectToolsForTurn(a.Tools.All(), nil, "", nil)
 	}
 	return int(builder.EstimateContextTokens(engine.BuildRequest{
 		Model:            a.Config.Model,
@@ -948,7 +953,6 @@ func (a *App) compactedProjectKnowledge(ctx context.Context, current *session.Se
 	}
 	return a.projectKnowledgeContext(ctx, current, summary)
 }
-
 
 // compactMessagesMidRun force-compacts an in-flight message list when the engine
 // estimates the composed context has reached MaxContextTokens mid-run.

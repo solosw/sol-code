@@ -331,7 +331,11 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 			SkillNames:   appSkillNames(application),
 			PlanMode:     application != nil && application.Permissions != nil && application.Permissions.Mode() == permission.ModePlan,
 		}
-		return builder.EstimateContextTokens(engine.BuildRequest{WorkDir: cfg.WorkDir, Tools: application.Tools.All()})
+		var tools []tool.Tool
+		if application != nil && application.Tools != nil {
+			tools = engine.SelectToolsForTurn(application.Tools.All(), nil, "", nil)
+		}
+		return builder.EstimateContextTokens(engine.BuildRequest{WorkDir: cfg.WorkDir, Tools: tools})
 	})
 	model.SetContextLimitFn(func() int64 { return cfg.MaxContextTokens })
 	model.SetSlashCommandHandler(func(command, args string) string {
@@ -1097,7 +1101,6 @@ func toolResultText(result *sdk.ToolResultBlockParam) string {
 	return strings.Join(parts, "\n")
 }
 
-
 func workflowSlashAlias(name string) string {
 	name = strings.TrimSpace(strings.ToLower(name))
 	if name == "" {
@@ -1323,7 +1326,7 @@ func usageFromSession(cfg config.Config, application *app.App, s *session.Sessio
 	}
 	var tools []tool.Tool
 	if application != nil && application.Tools != nil {
-		tools = application.Tools.All()
+		tools = engine.SelectToolsForTurn(application.Tools.All(), nil, "", nil)
 	}
 	estimated := builder.EstimateContextTokens(engine.BuildRequest{
 		Model:          cfg.Model,

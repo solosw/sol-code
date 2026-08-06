@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/solosw/solcode/internal/config"
 	"github.com/solosw/solcode/internal/workflow"
 )
 
@@ -26,8 +27,22 @@ type Config struct {
 	Delete      func(name string) error
 	Reload      func()
 	Tools       func() []string
-	Addr        string // empty → 127.0.0.1:0
+	Addr        string // empty -> 127.0.0.1:0
 	OpenBrowser bool
+
+	// Settings support. Settings returns the current config; ApplySettings
+	// receives a (possibly partial) config update and applies it at runtime
+	// plus persists it. Skills returns skill descriptors for the UI.
+	Settings      func() config.Config
+	ApplySettings func(next config.Config) error
+	Skills        func() []SkillInfo
+}
+
+// SkillInfo is a skill descriptor exposed to the settings UI.
+type SkillInfo struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Enabled     bool   `json:"enabled"`
 }
 
 // Server is a local HTTP server hosting the node editor UI.
@@ -82,6 +97,11 @@ func Start(cfg Config) (*Server, string, error) {
 	mux.HandleFunc("/api/workflows", s.handleWorkflows)
 	mux.HandleFunc("/api/workflows/", s.handleWorkflowByName)
 	mux.HandleFunc("/api/save", s.handleSave)
+	mux.HandleFunc("/api/settings", s.handleSettings)
+	mux.HandleFunc("/api/providers", s.handleProviders)
+	mux.HandleFunc("/api/providers/", s.handleProviderByName)
+	mux.HandleFunc("/api/models", s.handleModels)
+	mux.HandleFunc("/api/models/", s.handleModelByName)
 	staticRoot, err := fs.Sub(staticFS, "static")
 	if err != nil {
 		_ = ln.Close()
@@ -254,6 +274,382 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ---- Settings ----
+
+type settingsResponse struct {
+	Provider   string                   `json:"provider"`
+	Model      string                   `json:"model"`
+	Effort     string                   `json:"effort"`
+	MaxTurns   int                      `json:"max_turns"`
+	MaxContext int64                    `json:"max_context_tokens"`
+	APIFormat  string                   `json:"api_format"`
+	Providers  []providerSummary        `json:"providers"`
+	MCPServers []config.MCPServerConfig `json:"mcp_servers"`
+	Skills     []SkillInfo              `json:"skills"`
+}
+
+type providerSummary struct {
+	Name      string   `json:"name"`
+	APIKeySet bool     `json:"api_key_set"`
+	BaseURL   string   `json:"base_url"`
+	APIFormat string   `json:"api_format"`
+	Models    []string `json:"models"`
+}
+
+func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		s.getSettings(w, r)
+		return
+	}
+	if r.Method == http.MethodPost {
+		s.postSettings(w, r)
+		return
+	}
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+}
+
+func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Settings == nil {
+		http.Error(w, "settings not configured", http.StatusNotImplemented)
+		return
+	}
+	cfg := s.cfg.Settings()
+	resp := settingsResponse{
+		Provider:   cfg.Provider,
+		Model:      cfg.Model,
+		Effort:     cfg.Effort,
+		MaxTurns:   cfg.MaxTurns,
+		MaxContext: cfg.MaxContextTokens,
+		APIFormat:  cfg.APIFormat,
+		MCPServers: cfg.MCP.Servers,
+	}
+	for _, p := range cfg.Providers {
+		summary := providerSummary{
+			Name:      p.Name,
+			APIKeySet: strings.TrimSpace(p.APIKey) != "" || strings.TrimSpace(p.APIKeyEnv) != "",
+			BaseURL:   p.BaseURL,
+			APIFormat: p.APIFormat,
+		}
+		for _, m := range p.Models {
+			summary.Models = append(summary.Models, m.Name)
+		}
+		resp.Providers = append(resp.Providers, summary)
+	}
+	if s.cfg.Skills != nil {
+		resp.Skills = s.cfg.Skills()
+	}
+	writeJSON(w, resp)
+}
+
+type settingsUpdate struct {
+	Provider   *string `json:"provider,omitempty"`
+	Model      *string `json:"model,omitempty"`
+	Effort     *string `json:"effort,omitempty"`
+	MaxTurns   *int    `json:"max_turns,omitempty"`
+	MaxContext *int64  `json:"max_context_tokens,omitempty"`
+	// MCP server Disabled toggles keyed by name.
+	MCPDisabled map[string]bool `json:"mcp_disabled,omitempty"`
+	// Skill enable/disable toggles keyed by name.
+	SkillsEnabled  map[string]bool `json:"skills_enabled,omitempty"`
+	SkillsDisabled map[string]bool `json:"skills_disabled,omitempty"`
+}
+
+func (s *Server) postSettings(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Settings == nil || s.cfg.ApplySettings == nil {
+		http.Error(w, "settings not configured", http.StatusNotImplemented)
+		return
+	}
+	var req settingsUpdate
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	next := s.cfg.Settings()
+
+	if req.Provider != nil {
+		next.Provider = strings.TrimSpace(*req.Provider)
+	}
+	if req.Model != nil {
+		next.Model = strings.TrimSpace(*req.Model)
+	}
+	if req.Effort != nil {
+		next.Effort = strings.TrimSpace(*req.Effort)
+	}
+	if req.MaxTurns != nil {
+		next.MaxTurns = *req.MaxTurns
+	}
+	if req.MaxContext != nil {
+		next.MaxContextTokens = *req.MaxContext
+	}
+
+	// MCP toggles
+	if len(req.MCPDisabled) > 0 {
+		for i := range next.MCP.Servers {
+			if disabled, ok := req.MCPDisabled[next.MCP.Servers[i].Name]; ok {
+				next.MCP.Servers[i].Disabled = disabled
+			}
+		}
+		next.MCPServers = cloneMCPServers(next.MCP.Servers)
+	}
+
+	// Skill toggles
+	if len(req.SkillsEnabled) > 0 || len(req.SkillsDisabled) > 0 {
+		for name, enabled := range req.SkillsEnabled {
+			if enabled {
+				next.Skills.Disabled = removeString(next.Skills.Disabled, name)
+				if len(next.Skills.Enabled) > 0 {
+					next.Skills.Enabled = appendUnique(next.Skills.Enabled, name)
+				}
+			}
+		}
+		for name, disabled := range req.SkillsDisabled {
+			if disabled {
+				next.Skills.Enabled = removeString(next.Skills.Enabled, name)
+				next.Skills.Disabled = appendUnique(next.Skills.Disabled, name)
+			}
+		}
+	}
+
+	// Note: we intentionally do NOT call Normalize() here. The ApplySettings
+	// callback handles persistence + reload, which normalizes the full config.
+	// Calling Normalize on the partial copy would fail when the provider/model
+	// configuration is in an intermediate state (e.g. a new provider with no
+	// models yet), blocking legitimate saves.
+	if err := s.cfg.ApplySettings(next); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// ---- Providers add/delete ----
+
+type providerRequest struct {
+	Name      string `json:"name"`
+	APIKey    string `json:"api_key"`
+	BaseURL   string `json:"base_url"`
+	APIFormat string `json:"api_format"`
+}
+
+func (s *Server) handleProviders(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.cfg.Settings == nil || s.cfg.ApplySettings == nil {
+		http.Error(w, "settings not configured", http.StatusNotImplemented)
+		return
+	}
+	var req providerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		http.Error(w, "provider name required", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.BaseURL) == "" {
+		http.Error(w, "base_url required", http.StatusBadRequest)
+		return
+	}
+	next := s.cfg.Settings()
+	for _, p := range next.Providers {
+		if p.Name == name {
+			http.Error(w, fmt.Sprintf("provider %q already exists", name), http.StatusConflict)
+			return
+		}
+	}
+	apiFormat := strings.TrimSpace(req.APIFormat)
+	if apiFormat == "" {
+		apiFormat = "anthropic"
+	}
+	next.Providers = append(append([]config.ProviderConfig(nil), next.Providers...), config.ProviderConfig{
+		Name:      name,
+		APIKey:    strings.TrimSpace(req.APIKey),
+		BaseURL:   strings.TrimSpace(req.BaseURL),
+		APIFormat: apiFormat,
+		Models:    []config.ModelConfig{},
+	})
+	if err := s.cfg.ApplySettings(next); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "name": name})
+}
+
+func (s *Server) handleProviderByName(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.cfg.Settings == nil || s.cfg.ApplySettings == nil {
+		http.Error(w, "settings not configured", http.StatusNotImplemented)
+		return
+	}
+	name := strings.TrimPrefix(r.URL.Path, "/api/providers/")
+	name = strings.Trim(name, "/")
+	if name == "" {
+		http.Error(w, "name required", http.StatusBadRequest)
+		return
+	}
+	next := s.cfg.Settings()
+	found := false
+	out := make([]config.ProviderConfig, 0, len(next.Providers))
+	for _, p := range next.Providers {
+		if p.Name == name {
+			found = true
+			continue
+		}
+		out = append(out, p)
+	}
+	if !found {
+		http.Error(w, fmt.Sprintf("provider %q not found", name), http.StatusNotFound)
+		return
+	}
+	next.Providers = out
+	// Clear active provider/model if they belonged to the deleted provider.
+	if next.Provider == name {
+		next.Provider = ""
+	}
+	modelBelongsToProvider := false
+	for _, p := range next.Providers {
+		for _, m := range p.Models {
+			if m.Name == next.Model || m.ID == next.Model {
+				modelBelongsToProvider = true
+				break
+			}
+		}
+	}
+	if !modelBelongsToProvider {
+		next.Model = ""
+	}
+	if err := s.cfg.ApplySettings(next); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "name": name})
+}
+
+// ---- Models add/delete ----
+
+type modelRequest struct {
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
+func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.cfg.Settings == nil || s.cfg.ApplySettings == nil {
+		http.Error(w, "settings not configured", http.StatusNotImplemented)
+		return
+	}
+	var req modelRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	providerName := strings.TrimSpace(req.Provider)
+	modelID := strings.TrimSpace(req.Model)
+	if providerName == "" || modelID == "" {
+		http.Error(w, "provider and model required", http.StatusBadRequest)
+		return
+	}
+	next := s.cfg.Settings()
+	found := false
+	for i := range next.Providers {
+		p := &next.Providers[i]
+		if p.Name != providerName {
+			continue
+		}
+		found = true
+		for _, m := range p.Models {
+			if m.Name == modelID || m.ID == modelID {
+				http.Error(w, fmt.Sprintf("model %q already exists for provider %q", modelID, providerName), http.StatusConflict)
+				return
+			}
+		}
+		p.Models = append(p.Models, config.ModelConfig{
+			Name:     modelID,
+			ID:       modelID,
+			Provider: providerName,
+		})
+		break
+	}
+	if !found {
+		http.Error(w, fmt.Sprintf("provider %q not found", providerName), http.StatusNotFound)
+		return
+	}
+	if err := s.cfg.ApplySettings(next); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "provider": providerName, "model": modelID})
+}
+
+func (s *Server) handleModelByName(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.cfg.Settings == nil || s.cfg.ApplySettings == nil {
+		http.Error(w, "settings not configured", http.StatusNotImplemented)
+		return
+	}
+	rest := strings.TrimPrefix(r.URL.Path, "/api/models/")
+	parts := strings.SplitN(strings.Trim(rest, "/"), "/", 2)
+	if len(parts) != 2 {
+		http.Error(w, "path format: /api/models/{provider}/{model}", http.StatusBadRequest)
+		return
+	}
+	providerName := parts[0]
+	modelID := parts[1]
+	if providerName == "" || modelID == "" {
+		http.Error(w, "provider and model required", http.StatusBadRequest)
+		return
+	}
+	next := s.cfg.Settings()
+	found := false
+	for i := range next.Providers {
+		p := &next.Providers[i]
+		if p.Name != providerName {
+			continue
+		}
+		out := make([]config.ModelConfig, 0, len(p.Models))
+		for _, m := range p.Models {
+			if m.Name == modelID || m.ID == modelID {
+				found = true
+				continue
+			}
+			out = append(out, m)
+		}
+		p.Models = out
+		break
+	}
+	if !found {
+		http.Error(w, fmt.Sprintf("model %q not found for provider %q", modelID, providerName), http.StatusNotFound)
+		return
+	}
+	if next.Model == modelID {
+		next.Model = ""
+	}
+	if err := next.Normalize(); err != nil {
+		http.Error(w, "normalize: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.cfg.ApplySettings(next); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "provider": providerName, "model": modelID})
+}
+
+// ---- helpers ----
+
 func toDTO(def workflow.Definition) workflowDTO {
 	layout := workflow.Layout{Nodes: map[string]workflow.NodePos{}}
 	if def.Path != "" {
@@ -276,6 +672,7 @@ func toDTO(def workflow.Definition) workflowDTO {
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
@@ -298,4 +695,31 @@ func openBrowser(url string) error {
 		cmd = exec.Command("xdg-open", url)
 	}
 	return cmd.Start()
+}
+
+func cloneMCPServers(servers []config.MCPServerConfig) []config.MCPServerConfig {
+	out := make([]config.MCPServerConfig, len(servers))
+	for i, s := range servers {
+		out[i] = s
+	}
+	return out
+}
+
+func appendUnique(values []string, value string) []string {
+	for _, v := range values {
+		if v == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+func removeString(values []string, target string) []string {
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		if v != target {
+			out = append(out, v)
+		}
+	}
+	return out
 }

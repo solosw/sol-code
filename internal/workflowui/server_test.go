@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/solosw/solcode/internal/config"
 	"github.com/solosw/solcode/internal/workflow"
 )
 
@@ -157,5 +158,174 @@ func TestServerListAndSave(t *testing.T) {
 	}
 	if len(list2) != 0 {
 		t.Fatalf("expected empty list after delete, got %#v", list2)
+	}
+}
+
+func TestServerSettingsProvidersModels(t *testing.T) {
+	dir := t.TempDir()
+	stored := config.Config{
+		WorkDir:  dir,
+		Provider: "test",
+		Model:    "test-model",
+		Effort:   "high",
+		Providers: []config.ProviderConfig{
+			{
+				Name:      "test",
+				APIKey:    "secret",
+				BaseURL:   "https://api.test.com",
+				APIFormat: "anthropic",
+				Models: []config.ModelConfig{
+					{Name: "test-model", ID: "test-model", Provider: "test"},
+				},
+			},
+		},
+	}
+	stored.MCP.Servers = []config.MCPServerConfig{
+		{Name: "fs", Command: "npx", Args: []string{"fs"}, Disabled: false},
+	}
+
+	var applied *config.Config
+	srv, url, err := Start(Config{
+		WorkDir: dir,
+		List:    func() []workflow.Definition { return nil },
+		Save: func(def workflow.Definition, scope workflow.SaveScope, layout *workflow.Layout) (string, error) {
+			return "", nil
+		},
+		Settings: func() config.Config { return stored },
+		ApplySettings: func(next config.Config) error {
+			cp := next
+			applied = &cp
+			stored = next
+			return nil
+		},
+		Skills: func() []SkillInfo {
+			return []SkillInfo{{Name: "review", Description: "code review", Enabled: true}}
+		},
+		OpenBrowser: false,
+	})
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+
+	// GET /api/settings
+	res, err := http.Get(url + "api/settings")
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != 200 {
+		t.Fatalf("settings status %d", res.StatusCode)
+	}
+	var s map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&s); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	providers, _ := s["providers"].([]any)
+	if len(providers) != 1 {
+		t.Fatalf("expected 1 provider, got %#v", providers)
+	}
+	prov0, _ := providers[0].(map[string]any)
+	if prov0["name"] != "test" || !prov0["api_key_set"].(bool) {
+		t.Fatalf("provider summary wrong: %#v", prov0)
+	}
+	skills, _ := s["skills"].([]any)
+	if len(skills) != 1 || skills[0].(map[string]any)["name"] != "review" {
+		t.Fatalf("skills wrong: %#v", skills)
+	}
+
+	// POST /api/settings - toggle MCP off
+	body := `{"mcp_disabled":{"fs":true}}`
+	resp, err := http.Post(url+"api/settings", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("post settings: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("post settings status %d: %s", resp.StatusCode, raw)
+	}
+	if applied == nil {
+		t.Fatalf("settings not applied")
+	}
+	fsDisabled := false
+	for _, s := range applied.MCP.Servers {
+		if s.Name == "fs" {
+			fsDisabled = s.Disabled
+		}
+	}
+	if !fsDisabled {
+		t.Fatalf("MCP fs not disabled: %#v", applied.MCP.Servers)
+	}
+
+	// POST /api/providers - add provider
+	body = `{"name":"openai","api_key":"sk-xxx","base_url":"https://api.openai.com","api_format":"openai"}`
+	resp2, err := http.Post(url+"api/providers", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("add provider: %v", err)
+	}
+	defer resp2.Body.Close()
+	if resp2.StatusCode != 200 {
+		raw, _ := io.ReadAll(resp2.Body)
+		t.Fatalf("add provider status %d: %s", resp2.StatusCode, raw)
+	}
+	if len(applied.Providers) != 2 || applied.Providers[1].Name != "openai" {
+		t.Fatalf("provider not added: %#v", applied.Providers)
+	}
+
+	// DELETE /api/providers/openai
+	req, _ := http.NewRequest(http.MethodDelete, url+"api/providers/openai", nil)
+	resp3, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("delete provider: %v", err)
+	}
+	defer resp3.Body.Close()
+	if resp3.StatusCode != 200 {
+		raw, _ := io.ReadAll(resp3.Body)
+		t.Fatalf("delete provider status %d: %s", resp3.StatusCode, raw)
+	}
+	if len(applied.Providers) != 1 {
+		t.Fatalf("provider not deleted: %#v", applied.Providers)
+	}
+
+	// POST /api/models - add model
+	body = `{"provider":"test","model":"new-model"}`
+	resp4, err := http.Post(url+"api/models", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("add model: %v", err)
+	}
+	defer resp4.Body.Close()
+	if resp4.StatusCode != 200 {
+		raw, _ := io.ReadAll(resp4.Body)
+		t.Fatalf("add model status %d: %s", resp4.StatusCode, raw)
+	}
+	if len(applied.Providers[0].Models) != 2 {
+		t.Fatalf("model not added: %#v", applied.Providers[0].Models)
+	}
+
+	// DELETE /api/models/test/new-model
+	req2, _ := http.NewRequest(http.MethodDelete, url+"api/models/test/new-model", nil)
+	resp5, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatalf("delete model: %v", err)
+	}
+	defer resp5.Body.Close()
+	if resp5.StatusCode != 200 {
+		raw, _ := io.ReadAll(resp5.Body)
+		t.Fatalf("delete model status %d: %s", resp5.StatusCode, raw)
+	}
+	if len(applied.Providers[0].Models) != 1 {
+		t.Fatalf("model not deleted: %#v", applied.Providers[0].Models)
+	}
+
+	// Duplicate provider should return 409
+	body = `{"name":"test","base_url":"https://api.test.com","api_format":"anthropic"}`
+	resp6, err := http.Post(url+"api/providers", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("dup provider: %v", err)
+	}
+	defer resp6.Body.Close()
+	if resp6.StatusCode != http.StatusConflict {
+		t.Fatalf("expected 409 for duplicate provider, got %d", resp6.StatusCode)
 	}
 }

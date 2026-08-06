@@ -11,14 +11,14 @@ func TestSlashHelpIncludesWorkflowEdit(t *testing.T) {
 	if !strings.Contains(slashHelpText(), "/workflow-edit") {
 		t.Fatal("help missing /workflow-edit")
 	}
-	if !strings.Contains(slashHelpText(), "/workflow-ui") {
-		t.Fatal("help missing /workflow-ui")
+	if !strings.Contains(slashHelpText(), "/web-ui") {
+		t.Fatal("help missing /web-ui")
 	}
 	if !isBuiltinSlashCommand("workflow-edit") {
 		t.Fatal("workflow-edit should be builtin")
 	}
-	if !isBuiltinSlashCommand("workflow-ui") {
-		t.Fatal("workflow-ui should be builtin")
+	if !isBuiltinSlashCommand("web-ui") {
+		t.Fatal("web-ui should be builtin")
 	}
 }
 

@@ -54,7 +54,7 @@ func slashHelpText() string {
 		"/workflow <name> [args] — run a workflow by name (switches to bypass mode)",
 		"/[name]-workflow [args] — shortcut for any loaded workflow (e.g. ppt → /ppt-workflow)",
 		"/workflow-edit — terminal workflow orchestrator (list/edit tasks)",
-		"/workflow-ui — open Dify-style web node editor (browser)",
+		"/web-ui — open Dify-style web node editor (browser)",
 		"/[skill] [args] — invoke a loaded skill by name",
 	}, "\n")
 }
@@ -161,9 +161,9 @@ func (m *Model) handleSlashCommand(input string) (bool, tea.Cmd) {
 		}
 	case "workflow-edit":
 		m.ShowWorkflowEditor()
-	case "workflow-ui":
+	case "web-ui":
 		if m.workflowUIHandler == nil {
-			m.appendCommandResult("/workflow-ui is not available in this session.")
+			m.appendCommandResult("/web-ui is not available in this session.")
 		} else {
 			m.appendCommandResult(m.workflowUIHandler())
 		}
@@ -313,7 +313,7 @@ var builtinCommands = map[string]bool{
 	"workflows":     true,
 	"workflow":      true,
 	"workflow-edit": true,
-	"workflow-ui":   true,
+	"web-ui":        true,
 }
 
 func isBuiltinSlashCommand(name string) bool {

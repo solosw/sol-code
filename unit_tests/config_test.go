@@ -219,6 +219,84 @@ func TestLoadLegacyFlatJSON(t *testing.T) {
 	}
 }
 
+func TestUserPersistencePathOverridesProjectSettings(t *testing.T) {
+	dir := t.TempDir()
+	home := filepath.Join(dir, "home")
+	project := filepath.Join(dir, "project")
+	mustMkdirAll(t, home)
+	mustMkdirAll(t, project)
+	mustMkdirAll(t, filepath.Join(home, ".solcode"))
+	mustMkdirAll(t, filepath.Join(project, ".solcode"))
+
+	oldHome := os.Getenv("HOME")
+	oldUserProfile := os.Getenv("USERPROFILE")
+	oldPwd, _ := os.Getwd()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if err := os.Chdir(project); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldPwd)
+		_ = os.Setenv("HOME", oldHome)
+		_ = os.Setenv("USERPROFILE", oldUserProfile)
+	})
+
+	writeFile(t, filepath.Join(home, ".solcode", "settings.json"), `{
+  "provider": "user",
+  "model": "user-model",
+  "providers": [{"name":"user","base_url":"https://user.example","models":[{"name":"user-model","id":"user-model"}]}]
+}`)
+	writeFile(t, filepath.Join(project, ".solcode", "settings.json"), `{
+  "provider": "project",
+  "model": "project-model",
+  "providers": [{"name":"project","base_url":"https://project.example","models":[{"name":"project-model","id":"project-model"}]}]
+}`)
+
+	path := config.PersistencePath("", project)
+	wantPath := filepath.Join(home, ".solcode", "settings.local.json")
+	if path != wantPath {
+		t.Fatalf("PersistencePath() = %q, want %q", path, wantPath)
+	}
+	if explicitPath := config.PersistencePath(filepath.Join(project, "custom.json"), project); explicitPath != wantPath {
+		t.Fatalf("PersistencePath(--config) = %q, want %q", explicitPath, wantPath)
+	}
+	if err := config.SaveLocalOverrides(path, map[string]any{
+		"provider": "saved",
+		"model":    "saved-model",
+		"providers": []config.ProviderConfig{{
+			Name:    "saved",
+			BaseURL: "https://saved.example",
+			Models:  []config.ModelConfig{{Name: "saved-model", ID: "saved-model"}},
+		}},
+		"effort": "low",
+	}); err != nil {
+		t.Fatalf("SaveLocalOverrides() = %v", err)
+	}
+
+	cfg, err := config.Load("")
+	if err != nil {
+		t.Fatalf("Load() = %v", err)
+	}
+	if cfg.Provider != "saved" || cfg.Model != "saved-model" || cfg.Effort != "low" {
+		t.Fatalf("reloaded config = provider %q, model %q, effort %q", cfg.Provider, cfg.Model, cfg.Effort)
+	}
+
+	explicitPath := filepath.Join(project, "explicit.json")
+	writeFile(t, explicitPath, `{
+  "provider": "project",
+  "model": "project-model",
+  "providers": [{"name":"project","base_url":"https://project.example","models":[{"name":"project-model","id":"project-model"}]}]
+}`)
+	cfg, err = config.Load(explicitPath)
+	if err != nil {
+		t.Fatalf("Load(explicit) = %v", err)
+	}
+	if cfg.Provider != "saved" || cfg.Model != "saved-model" || cfg.Effort != "low" {
+		t.Fatalf("explicit config with user override = provider %q, model %q, effort %q", cfg.Provider, cfg.Model, cfg.Effort)
+	}
+}
+
 func TestLoadSolcodeLayeredConfig(t *testing.T) {
 	dir := t.TempDir()
 	home := filepath.Join(dir, "home")

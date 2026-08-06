@@ -8,91 +8,195 @@
 </head>
 <body>
   <div id="app">
-    <aside id="sidebar">
-      <div class="brand">
-        <div class="brand-title">solcode</div>
-        <div class="brand-sub">Workflow Node Editor</div>
-      </div>
-      <div class="sidebar-actions">
-        <button id="btn-new" class="btn primary">+ New workflow</button>
-        <button id="btn-refresh" class="btn">Refresh</button>
-      </div>
-      <div class="section-label">Workflows</div>
-      <div id="workflow-list" class="list"></div>
-      <div class="sidebar-foot" id="meta-foot"></div>
-    </aside>
+    <!-- Tab bar -->
+    <nav id="tabbar">
+      <button class="tab active" data-tab="workflow">Workflows</button>
+      <button class="tab" data-tab="settings">Settings</button>
+    </nav>
 
-    <main id="main">
-      <header id="topbar">
-        <div class="top-fields">
-          <label>Name <input id="wf-name" type="text" placeholder="workflow-name" /></label>
-          <label class="grow">Description <input id="wf-desc" type="text" placeholder="One-line purpose" /></label>
-          <label>Mode
-            <select id="wf-mode">
-              <option value="auto">auto</option>
-              <option value="serial">serial</option>
-              <option value="parallel">parallel</option>
-            </select>
-          </label>
-          <label>Save to
-            <select id="wf-scope">
-              <option value="project">Project</option>
-              <option value="user">User</option>
-            </select>
-          </label>
+    <!-- Workflow tab -->
+    <div id="tab-workflow" class="tab-panel">
+      <aside id="sidebar">
+        <div class="brand">
+          <div class="brand-title">solcode</div>
+          <div class="brand-sub">Workflow Node Editor</div>
         </div>
-        <div class="top-actions">
-          <button id="btn-add-node" class="btn">+ Node</button>
-          <button id="btn-auto-layout" class="btn">Auto layout</button>
-          <button id="btn-delete-wf" class="btn danger">Delete workflow</button>
-          <button id="btn-save" class="btn primary">Save</button>
+        <div class="sidebar-actions">
+          <button id="btn-new" class="btn primary">+ New workflow</button>
+          <button id="btn-refresh" class="btn">Refresh</button>
         </div>
-      </header>
+        <div class="section-label">Workflows</div>
+        <div id="workflow-list" class="list"></div>
+        <div class="sidebar-foot" id="meta-foot"></div>
+      </aside>
 
-      <div id="workspace">
-        <div id="canvas-wrap">
-          <svg id="edges" xmlns="http://www.w3.org/2000/svg"></svg>
-          <div id="canvas"></div>
-          <div id="hint" class="canvas-hint">
-            Drag nodes · drag from right port to left port to connect · Delete removes selection · wheel zoom · middle-drag pan
-          </div>
-        </div>
-
-        <aside id="inspector">
-          <div class="section-label">Node properties</div>
-          <div id="inspector-empty" class="muted">Select a node to edit.</div>
-          <div id="inspector-form" class="hidden">
-            <label>ID <input id="node-id" type="text" /></label>
-            <label>Description <input id="node-desc" type="text" /></label>
-            <label>Difficulty
-              <select id="node-diff">
-                <option value="easy">easy</option>
-                <option value="medium">medium</option>
-                <option value="hard">hard</option>
-                <option value="">default</option>
+      <main id="main">
+        <header id="topbar">
+          <div class="top-fields">
+            <label>Name <input id="wf-name" type="text" placeholder="workflow-name" /></label>
+            <label class="grow">Description <input id="wf-desc" type="text" placeholder="One-line purpose" /></label>
+            <label>Mode
+              <select id="wf-mode">
+                <option value="auto">auto</option>
+                <option value="serial">serial</option>
+                <option value="parallel">parallel</option>
               </select>
             </label>
-            <div class="field-block">
-              <div class="field-label">Allowed tools</div>
-              <div class="multi-select" id="node-tools-wrap">
-                <button type="button" class="multi-select-toggle" id="node-tools-toggle">Select tools…</button>
-                <div class="multi-select-panel hidden" id="node-tools-panel"></div>
-              </div>
-            </div>
-            <div class="field-block">
-              <div class="field-label">Depends on</div>
-              <div class="multi-select" id="node-deps-wrap">
-                <button type="button" class="multi-select-toggle" id="node-deps-toggle">Select dependencies…</button>
-                <div class="multi-select-panel hidden" id="node-deps-panel"></div>
-              </div>
-            </div>
-            <label>Prompt <textarea id="node-prompt" rows="10" placeholder="Task instructions. Use {{args}}"></textarea></label>
-            <button id="btn-del-node" class="btn danger">Delete node</button>
+            <label>Save to
+              <select id="wf-scope">
+                <option value="project">Project</option>
+                <option value="user">User</option>
+              </select>
+            </label>
           </div>
-          <div id="status" class="status"></div>
-        </aside>
-      </div>
-    </main>
+          <div class="top-actions">
+            <button id="btn-add-node" class="btn">+ Node</button>
+            <button id="btn-auto-layout" class="btn">Auto layout</button>
+            <button id="btn-delete-wf" class="btn danger">Delete workflow</button>
+            <button id="btn-save" class="btn primary">Save</button>
+          </div>
+        </header>
+
+        <div id="workspace">
+          <div id="canvas-wrap">
+            <svg id="edges" xmlns="http://www.w3.org/2000/svg"></svg>
+            <div id="canvas"></div>
+            <div id="hint" class="canvas-hint">
+              Drag nodes · drag from right port to left port to connect · Delete removes selection · wheel zoom · middle-drag pan
+            </div>
+          </div>
+
+          <aside id="inspector">
+            <div class="section-label">Node properties</div>
+            <div id="inspector-empty" class="muted">Select a node to edit.</div>
+            <div id="inspector-form" class="hidden">
+              <label>ID <input id="node-id" type="text" /></label>
+              <label>Description <input id="node-desc" type="text" /></label>
+              <label>Difficulty
+                <select id="node-diff">
+                  <option value="easy">easy</option>
+                  <option value="medium">medium</option>
+                  <option value="hard">hard</option>
+                  <option value="">default</option>
+                </select>
+              </label>
+              <div class="field-block">
+                <div class="field-label">Allowed tools</div>
+                <div class="multi-select" id="node-tools-wrap">
+                  <button type="button" class="multi-select-toggle" id="node-tools-toggle">Select tools…</button>
+                  <div class="multi-select-panel hidden" id="node-tools-panel"></div>
+                </div>
+              </div>
+              <div class="field-block">
+                <div class="field-label">Depends on</div>
+                <div class="multi-select" id="node-deps-wrap">
+                  <button type="button" class="multi-select-toggle" id="node-deps-toggle">Select dependencies…</button>
+                  <div class="multi-select-panel hidden" id="node-deps-panel"></div>
+                </div>
+              </div>
+              <label>Prompt <textarea id="node-prompt" rows="10" placeholder="Task instructions. Use {{args}}"></textarea></label>
+              <button id="btn-del-node" class="btn danger">Delete node</button>
+            </div>
+            <div id="status" class="status"></div>
+          </aside>
+        </div>
+      </main>
+    </div>
+
+    <!-- Settings tab -->
+    <div id="tab-settings" class="tab-panel hidden">
+      <main id="settings-main">
+        <header class="settings-header">
+          <div>
+            <div class="settings-title">Runtime Settings</div>
+            <div id="settings-dirty" class="settings-subtitle">All changes are saved together.</div>
+          </div>
+          <div class="settings-actions">
+            <button id="btn-reload-settings" class="btn" title="Discard local changes and reload">Reload</button>
+            <button id="btn-save-settings" class="btn primary">Save changes</button>
+          </div>
+        </header>
+        <div id="settings-status" class="status"></div>
+
+        <div class="settings-layout">
+          <section class="settings-section settings-runtime">
+            <h2>Model Runtime</h2>
+            <div class="settings-grid">
+              <label>Provider
+                <select id="set-provider"></select>
+              </label>
+              <label>Model
+                <select id="set-model"></select>
+              </label>
+              <label>Reasoning effort
+                <select id="set-effort">
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                </select>
+              </label>
+              <label>Max turns
+                <input id="set-max-turns" type="number" min="0" />
+              </label>
+              <label>Max context tokens
+                <input id="set-max-context" type="number" min="0" />
+              </label>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <div class="section-heading">
+              <h2>Providers</h2>
+              <span id="provider-count" class="badge"></span>
+            </div>
+            <div id="provider-list" class="settings-list"></div>
+            <details class="settings-add">
+              <summary>Add provider</summary>
+              <div class="settings-grid">
+                <label>Name <input id="new-prov-name" type="text" placeholder="my-provider" /></label>
+                <label>API key <input id="new-prov-key" type="password" autocomplete="off" placeholder="Optional" /></label>
+                <label class="span-2">Base URL <input id="new-prov-url" type="text" placeholder="https://api.example.com" /></label>
+                <label>API format
+                  <select id="new-prov-format">
+                    <option value="anthropic">anthropic</option>
+                    <option value="openai">openai</option>
+                  </select>
+                </label>
+              </div>
+              <button id="btn-add-provider" class="btn primary">Add provider</button>
+            </details>
+          </section>
+
+          <section class="settings-section">
+            <div class="section-heading">
+              <h2>Models</h2>
+              <span id="model-count" class="badge"></span>
+            </div>
+            <div id="model-list" class="settings-list"></div>
+            <details class="settings-add">
+              <summary>Add model</summary>
+              <div class="settings-grid settings-model-add">
+                <label>Provider
+                  <select id="new-model-provider"></select>
+                </label>
+                <label class="span-2">Model ID <input id="new-model-id" type="text" placeholder="claude-sonnet-4-5" /></label>
+              </div>
+              <button id="btn-add-model" class="btn primary">Add model</button>
+            </details>
+          </section>
+
+          <section class="settings-section">
+            <div class="section-heading"><h2>MCP Servers</h2></div>
+            <div id="mcp-list" class="settings-list"></div>
+          </section>
+
+          <section class="settings-section">
+            <div class="section-heading"><h2>Skills</h2></div>
+            <div id="skill-list" class="settings-list"></div>
+          </section>
+        </div>
+      </main>
+    </div>
   </div>
   <script src="/app.js"></script>
 </body>

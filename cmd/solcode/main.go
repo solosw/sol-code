@@ -544,6 +544,10 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 		return names
 	})
 	var workflowUIServer *workflowui.Server
+	var settingsReload struct {
+		sync.Mutex
+		generation uint64
+	}
 	model.SetWorkflowUIHandler(func() string {
 		if workflowUIServer != nil && workflowUIServer.URL() != "" {
 			_ = workflowui.OpenBrowser(workflowUIServer.URL())
@@ -584,6 +588,85 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 				out := make([]string, 0, len(all))
 				for _, item := range all {
 					out = append(out, item.Name())
+				}
+				return out
+			},
+			Settings: func() config.Config {
+				return cfg
+			},
+			ApplySettings: func(next config.Config) error {
+				if application == nil {
+					return fmt.Errorf("application is not available")
+				}
+				// Persist providers/models/mcp/skills/generation settings. Store
+				// empty active values too, so deleting the active provider/model
+				// cannot be undone by a stale local override after restart.
+				updates := map[string]any{
+					"provider":           next.Provider,
+					"model":              next.Model,
+					"providers":          next.Providers,
+					"mcp":                map[string]any{"servers": next.MCP.Servers},
+					"effort":             next.Effort,
+					"max_turns":          next.MaxTurns,
+					"max_context_tokens": next.MaxContextTokens,
+					"skills":             map[string]any{"enabled": next.Skills.Enabled, "disabled": next.Skills.Disabled},
+				}
+				if err := config.SaveLocalOverrides(persistencePath, updates); err != nil {
+					return fmt.Errorf("could not persist settings: %w", err)
+				}
+
+				// Persist synchronously so the settings API returns only after the
+				// user's changes are durable. Reloading MCP clients and skills can
+				// involve process startup and filesystem scans, so coalesce it in
+				// the background instead of blocking the browser request.
+				cfg = next
+				settingsReload.Lock()
+				settingsReload.generation++
+				generation := settingsReload.generation
+				settingsReload.Unlock()
+				go func(next config.Config, generation uint64) {
+					time.Sleep(150 * time.Millisecond)
+					settingsReload.Lock()
+					if generation != settingsReload.generation {
+						settingsReload.Unlock()
+						return
+					}
+					settingsReload.Unlock()
+
+					// A partly configured provider is valid while it is being edited,
+					// but cannot drive the live client until it has a resolvable model.
+					runtimeCfg := next
+					if err := runtimeCfg.Normalize(); err != nil {
+						return
+					}
+					if err := application.SwitchModel(runtimeCfg); err != nil {
+						return
+					}
+					if err := application.ReloadFeatures(runtimeCfg, nil); err != nil {
+						return
+					}
+				}(next, generation)
+				return nil
+			},
+			Skills: func() []workflowui.SkillInfo {
+				if application == nil {
+					return nil
+				}
+				// ReloadFeatures removes disabled skills from SkillRegistry. Enumerate
+				// source directories instead so a disabled skill remains visible and
+				// can be enabled again from the browser.
+				available := skill.LoadFromDirs(cfg.Skills.Paths...).All()
+				out := make([]workflowui.SkillInfo, 0, len(available))
+				for _, def := range available {
+					enabled := false
+					if application.SkillRegistry != nil {
+						_, enabled = application.SkillRegistry.Find(def.Name)
+					}
+					out = append(out, workflowui.SkillInfo{
+						Name:        def.Name,
+						Description: def.Description,
+						Enabled:     enabled,
+					})
 				}
 				return out
 			},

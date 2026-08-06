@@ -51,7 +51,7 @@ Empty `enabled` = all discovered workflows. `disabled` hides names.
   - same as `/workflow ppt make a deck about X`
   - if the workflow itself is already named `ppt-workflow`, `/ppt-workflow` still works
 - Terminal editor: `/workflow-edit`
-- Web node editor (Dify-style): `/workflow-ui` — drag nodes, connect ports, save to user/project dirs
+- Web node editor (Dify-style): `/web-ui` — drag nodes, connect ports, save to user/project dirs
 - Args are substituted into prompts as `{{args}}`
 
 ## Authoring

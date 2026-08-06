@@ -36,6 +36,26 @@
     depsToggle: document.getElementById("node-deps-toggle"),
     depsPanel: document.getElementById("node-deps-panel"),
     nodePrompt: document.getElementById("node-prompt"),
+    // settings elements
+    settingsStatus: document.getElementById("settings-status"),
+    settingsDirty: document.getElementById("settings-dirty"),
+    providerCount: document.getElementById("provider-count"),
+    modelCount: document.getElementById("model-count"),
+    setProvider: document.getElementById("set-provider"),
+    setModel: document.getElementById("set-model"),
+    setEffort: document.getElementById("set-effort"),
+    setMaxTurns: document.getElementById("set-max-turns"),
+    setMaxContext: document.getElementById("set-max-context"),
+    providerList: document.getElementById("provider-list"),
+    modelList: document.getElementById("model-list"),
+    mcpList: document.getElementById("mcp-list"),
+    skillList: document.getElementById("skill-list"),
+    newProvName: document.getElementById("new-prov-name"),
+    newProvKey: document.getElementById("new-prov-key"),
+    newProvUrl: document.getElementById("new-prov-url"),
+    newProvFormat: document.getElementById("new-prov-format"),
+    newModelProvider: document.getElementById("new-model-provider"),
+    newModelId: document.getElementById("new-model-id"),
   };
 
   function emptyWorkflow() {
@@ -62,7 +82,7 @@
   }
 
   async function api(path, opts) {
-    const res = await fetch(path, opts);
+    const res = await fetch(path, { cache: "no-store", ...(opts || {}) });
     if (!res.ok) {
       const text = await res.text();
       throw new Error(text || res.statusText);
@@ -715,6 +735,258 @@
     markDirty();
   }
 
+  // ---- Settings ----
+
+  const settings = {
+    data: null,
+    draft: null,
+    dirty: false,
+  };
+
+  function setSettingsStatus(msg, kind = "") {
+    el.settingsStatus.textContent = msg || "";
+    el.settingsStatus.className = "status" + (kind ? " " + kind : "");
+  }
+
+  function switchTab(tab) {
+    document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
+    document.getElementById("tab-workflow").classList.toggle("hidden", tab !== "workflow");
+    document.getElementById("tab-settings").classList.toggle("hidden", tab !== "settings");
+    if (tab === "settings" && !settings.draft) {
+      loadSettingsV2();
+    }
+  }
+
+  // ---- Settings rewrite: one local draft, one explicit save ----
+
+  function copySettings(value) {
+    return JSON.parse(JSON.stringify(value || {}));
+  }
+
+  function markSettingsDirty() {
+    settings.dirty = true;
+    el.settingsDirty.textContent = "Unsaved changes";
+    el.settingsDirty.classList.add("dirty");
+  }
+
+  function clearSettingsDirty() {
+    settings.dirty = false;
+    el.settingsDirty.textContent = "All changes are saved together.";
+    el.settingsDirty.classList.remove("dirty");
+  }
+
+  async function loadSettingsV2() {
+    try {
+      const data = await api("/api/settings");
+      settings.data = data;
+      settings.draft = copySettings(data);
+      clearSettingsDirty();
+      renderSettingsV2();
+    } catch (err) {
+      setSettingsStatus(String(err.message || err), "err");
+    }
+  }
+
+  function syncRuntimeSettings() {
+    const d = settings.draft;
+    if (!d) return;
+    d.provider = el.setProvider.value;
+    d.model = el.setModel.value;
+    d.effort = el.setEffort.value;
+    d.max_turns = numberInput(el.setMaxTurns.value, d.max_turns);
+    d.max_context_tokens = numberInput(el.setMaxContext.value, d.max_context_tokens);
+  }
+
+  function numberInput(value, fallback) {
+    if (String(value).trim() === "") return fallback || 0;
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback || 0;
+  }
+
+  function providerByName(name) {
+    return (settings.draft?.providers || []).find((p) => p.name === name);
+  }
+
+  function renderRuntimeModelOptions() {
+    const d = settings.draft;
+    const provider = providerByName(d.provider);
+    const models = provider?.models || [];
+    el.setModel.innerHTML = models.length
+      ? models.map((name) => `<option value="${escapeAttr(name)}">${escapeHtml(name)}</option>`).join("")
+      : `<option value="">No models configured</option>`;
+    if (models.includes(d.model)) {
+      el.setModel.value = d.model;
+    } else {
+      d.model = models[0] || "";
+      el.setModel.value = d.model;
+    }
+  }
+
+  function renderSettingsV2() {
+    const d = settings.draft;
+    if (!d) return;
+    const providers = d.providers || [];
+    const allModels = providers.flatMap((p) => (p.models || []).map((name) => ({ provider: p.name, name })));
+
+    el.setProvider.innerHTML = providers.length
+      ? providers.map((p) => `<option value="${escapeAttr(p.name)}">${escapeHtml(p.name)}</option>`).join("")
+      : `<option value="">No providers configured</option>`;
+    if (!providers.some((p) => p.name === d.provider)) {
+      d.provider = providers[0]?.name || "";
+    }
+    el.setProvider.value = d.provider;
+    renderRuntimeModelOptions();
+    el.setEffort.value = d.effort || "high";
+    el.setMaxTurns.value = d.max_turns ?? 0;
+    el.setMaxContext.value = d.max_context_tokens ?? 0;
+
+    el.providerCount.textContent = `${providers.length}`;
+    el.modelCount.textContent = `${allModels.length}`;
+    el.providerList.innerHTML = providers.length
+      ? providers.map((p) => `<div class="settings-row">
+          <div class="settings-row-main">
+            <strong>${escapeHtml(p.name)}</strong>
+            <span class="badge">${escapeHtml(p.api_format || "anthropic")}</span>
+            <span class="badge ${p.api_key_set ? "ok" : ""}">${p.api_key_set ? "key set" : "no key"}</span>
+            <div class="settings-row-detail">${escapeHtml(p.base_url || "No base URL")}</div>
+          </div>
+          <button class="icon-btn danger" data-del-provider="${escapeAttr(p.name)}" title="Delete provider">Delete</button>
+        </div>`).join("")
+      : `<div class="empty-state">No providers configured.</div>`;
+
+    el.modelList.innerHTML = allModels.length
+      ? allModels.map((m) => `<div class="settings-row">
+          <div class="settings-row-main"><strong>${escapeHtml(m.name)}</strong><span class="badge">${escapeHtml(m.provider)}</span></div>
+          <button class="icon-btn danger" data-del-model-provider="${escapeAttr(m.provider)}" data-del-model="${escapeAttr(m.name)}" title="Delete model">Delete</button>
+        </div>`).join("")
+      : `<div class="empty-state">No models configured.</div>`;
+
+    el.newModelProvider.innerHTML = providers.length
+      ? providers.map((p) => `<option value="${escapeAttr(p.name)}">${escapeHtml(p.name)}</option>`).join("")
+      : `<option value="">Add a provider first</option>`;
+
+    el.mcpList.innerHTML = (d.mcp_servers || []).length
+      ? d.mcp_servers.map((server) => `<label class="settings-row settings-toggle-row">
+          <div class="settings-row-main">
+            <strong>${escapeHtml(server.name)}</strong>
+            <span class="badge">${escapeHtml(server.transport || server.type || "stdio")}</span>
+            <div class="settings-row-detail">${escapeHtml(server.command || server.url || "")}</div>
+          </div>
+          <input type="checkbox" data-mcp-toggle="${escapeAttr(server.name)}" ${server.disabled ? "" : "checked"} />
+        </label>`).join("")
+      : `<div class="empty-state">No MCP servers configured.</div>`;
+
+    el.skillList.innerHTML = (d.skills || []).length
+      ? d.skills.map((skill) => `<label class="settings-row settings-toggle-row">
+          <div class="settings-row-main">
+            <strong>${escapeHtml(skill.name)}</strong>
+            <div class="settings-row-detail">${escapeHtml(skill.description || "")}</div>
+          </div>
+          <input type="checkbox" data-skill-toggle="${escapeAttr(skill.name)}" ${skill.enabled ? "checked" : ""} />
+        </label>`).join("")
+      : `<div class="empty-state">No skills available.</div>`;
+  }
+
+  async function saveSettingsV2() {
+    if (!settings.draft) return;
+    syncRuntimeSettings();
+    const d = settings.draft;
+    const payload = {
+      provider: d.provider,
+      model: d.model,
+      effort: d.effort,
+      max_turns: d.max_turns,
+      max_context_tokens: d.max_context_tokens,
+      mcp_disabled: Object.fromEntries((d.mcp_servers || []).map((s) => [s.name, Boolean(s.disabled)])),
+      skills_enabled: Object.fromEntries((d.skills || []).filter((s) => s.enabled).map((s) => [s.name, true])),
+      skills_disabled: Object.fromEntries((d.skills || []).filter((s) => !s.enabled).map((s) => [s.name, true])),
+    };
+    try {
+      await api("/api/settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      settings.data = copySettings(d);
+      clearSettingsDirty();
+      renderSettingsV2();
+      setSettingsStatus("Settings saved. Applying runtime changes in the background.", "ok");
+    } catch (err) {
+      setSettingsStatus(String(err.message || err), "err");
+    }
+  }
+
+  async function persistDraftBeforeStructureChange() {
+    if (!settings.dirty) return true;
+    await saveSettingsV2();
+    return !settings.dirty;
+  }
+
+  async function addProviderV2() {
+    const payload = {
+      name: el.newProvName.value.trim(),
+      api_key: el.newProvKey.value.trim(),
+      base_url: el.newProvUrl.value.trim(),
+      api_format: el.newProvFormat.value,
+    };
+    if (!payload.name || !payload.base_url) {
+      setSettingsStatus("Provider name and base URL are required.", "err");
+      return;
+    }
+    if (!(await persistDraftBeforeStructureChange())) return;
+    try {
+      await api("/api/providers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      el.newProvName.value = "";
+      el.newProvKey.value = "";
+      el.newProvUrl.value = "";
+      await loadSettingsV2();
+      setSettingsStatus(`Provider "${payload.name}" added.`, "ok");
+    } catch (err) {
+      setSettingsStatus(String(err.message || err), "err");
+    }
+  }
+
+  async function deleteProviderV2(name) {
+    if (!confirm(`Delete provider "${name}" and its models?`)) return;
+    if (!(await persistDraftBeforeStructureChange())) return;
+    try {
+      await api("/api/providers/" + encodeURIComponent(name), { method: "DELETE" });
+      await loadSettingsV2();
+      setSettingsStatus(`Provider "${name}" deleted.`, "ok");
+    } catch (err) {
+      setSettingsStatus(String(err.message || err), "err");
+    }
+  }
+
+  async function addModelV2() {
+    const payload = { provider: el.newModelProvider.value, model: el.newModelId.value.trim() };
+    if (!payload.provider || !payload.model) {
+      setSettingsStatus("Provider and model ID are required.", "err");
+      return;
+    }
+    if (!(await persistDraftBeforeStructureChange())) return;
+    try {
+      await api("/api/models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      el.newModelId.value = "";
+      await loadSettingsV2();
+      setSettingsStatus(`Model "${payload.model}" added.`, "ok");
+    } catch (err) {
+      setSettingsStatus(String(err.message || err), "err");
+    }
+  }
+
+  async function deleteModelV2(provider, model) {
+    if (!confirm(`Delete model "${model}" from "${provider}"?`)) return;
+    if (!(await persistDraftBeforeStructureChange())) return;
+    try {
+      await api(`/api/models/${encodeURIComponent(provider)}/${encodeURIComponent(model)}`, { method: "DELETE" });
+      await loadSettingsV2();
+      setSettingsStatus(`Model "${model}" deleted.`, "ok");
+    } catch (err) {
+      setSettingsStatus(String(err.message || err), "err");
+    }
+  }
+
   function escapeHtml(s) {
     return String(s)
       .replaceAll("&", "&amp;")
@@ -741,6 +1013,58 @@
     document.getElementById("btn-delete-wf").onclick = deleteWorkflow;
     document.getElementById("btn-save").onclick = saveWorkflow;
     document.getElementById("btn-del-node").onclick = deleteSelected;
+
+    // Settings bindings: the settings page owns one local draft.
+    document.querySelectorAll(".tab").forEach((b) => {
+      b.addEventListener("click", () => switchTab(b.dataset.tab));
+    });
+    document.getElementById("btn-save-settings").onclick = saveSettingsV2;
+    document.getElementById("btn-reload-settings").onclick = loadSettingsV2;
+    document.getElementById("btn-add-provider").onclick = addProviderV2;
+    document.getElementById("btn-add-model").onclick = addModelV2;
+
+    el.setProvider.addEventListener("change", () => {
+      if (!settings.draft) return;
+      settings.draft.provider = el.setProvider.value;
+      settings.draft.model = "";
+      renderRuntimeModelOptions();
+      markSettingsDirty();
+    });
+    [el.setModel, el.setEffort, el.setMaxTurns, el.setMaxContext].forEach((input) => {
+      input.addEventListener("change", () => {
+        syncRuntimeSettings();
+        markSettingsDirty();
+      });
+      input.addEventListener("input", () => {
+        if (input.type === "number") syncRuntimeSettings();
+        markSettingsDirty();
+      });
+    });
+
+    el.providerList.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-del-provider]");
+      if (btn) deleteProviderV2(btn.dataset.delProvider);
+    });
+    el.modelList.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-del-model]");
+      if (btn) deleteModelV2(btn.dataset.delModelProvider, btn.dataset.delModel);
+    });
+    el.mcpList.addEventListener("change", (e) => {
+      const input = e.target.closest("[data-mcp-toggle]");
+      if (!input || !settings.draft) return;
+      const server = (settings.draft.mcp_servers || []).find((s) => s.name === input.dataset.mcpToggle);
+      if (!server) return;
+      server.disabled = !input.checked;
+      markSettingsDirty();
+    });
+    el.skillList.addEventListener("change", (e) => {
+      const input = e.target.closest("[data-skill-toggle]");
+      if (!input || !settings.draft) return;
+      const skill = (settings.draft.skills || []).find((s) => s.name === input.dataset.skillToggle);
+      if (!skill) return;
+      skill.enabled = input.checked;
+      markSettingsDirty();
+    });
 
     el.toolsToggle.addEventListener("click", (e) => {
       e.stopPropagation();

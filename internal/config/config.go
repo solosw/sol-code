@@ -109,8 +109,8 @@ func DefaultKnowledgeGraphPath(workDir string) string {
 }
 
 type Config struct {
-	APIKey           string               `json:"api_key"`
-	BaseURL          string               `json:"base_url"`
+	APIKey  string `json:"api_key"`
+	BaseURL string `json:"base_url"`
 	// APIFormat selects the outbound chat protocol: "anthropic" (default) or "openai".
 	// OpenAI mode POSTs to {base_url}/chat/completions while keeping internal
 	// Anthropic message/tool types for the engine/session stack.
@@ -239,14 +239,14 @@ type MCPServerConfig struct {
 }
 
 type ProviderConfig struct {
-	Name       string        `json:"name"`
-	APIKey     string        `json:"api_key,omitempty"`
-	APIKeyEnv  string        `json:"api_key_env,omitempty"`
-	BaseURL    string        `json:"base_url,omitempty"`
-	BaseURLEnv string        `json:"base_url_env,omitempty"`
+	Name       string `json:"name"`
+	APIKey     string `json:"api_key,omitempty"`
+	APIKeyEnv  string `json:"api_key_env,omitempty"`
+	BaseURL    string `json:"base_url,omitempty"`
+	BaseURLEnv string `json:"base_url_env,omitempty"`
 	// APIFormat overrides Config.APIFormat for this provider when set.
-	APIFormat  string        `json:"api_format,omitempty"`
-	Models     []ModelConfig `json:"models"`
+	APIFormat string        `json:"api_format,omitempty"`
+	Models    []ModelConfig `json:"models"`
 }
 
 type ResolvedProvider struct {
@@ -336,6 +336,11 @@ func Load(path string) (Config, error) {
 	cfg := Default()
 	if path != "" {
 		if err := loadFile(&cfg, path); err != nil {
+			return cfg, err
+		}
+		// Runtime settings are user-scoped and always take precedence, even
+		// when the base configuration was selected with --config.
+		if err := loadOptionalFile(&cfg, DefaultRuntimeSettingsPath()); err != nil {
 			return cfg, err
 		}
 		if err := cfg.Normalize(); err != nil {
@@ -898,10 +903,7 @@ func (cfg *Config) normalizeSessionMemory() {
 	}
 }
 
-func PersistencePath(explicitConfigPath, workDir string) string {
-	if strings.TrimSpace(explicitConfigPath) != "" {
-		return filepath.Clean(expandPath(explicitConfigPath))
-	}
+func PersistencePath(_ string, _ string) string {
 	return DefaultRuntimeSettingsPath()
 }
 
@@ -968,9 +970,11 @@ func discoverDefaultPaths() []string {
 	home, _ := os.UserHomeDir()
 	paths := []string{
 		filepath.Join(home, configDirName, settingsFileName),
-		filepath.Join(home, configDirName, settingsLocalName),
 		filepath.Join(cwd, configDirName, settingsFileName),
 		filepath.Join(cwd, configDirName, settingsLocalName),
+		// Runtime settings are always written here by the Web UI and must
+		// override all project-level configuration on the next startup.
+		filepath.Join(home, configDirName, settingsLocalName),
 	}
 	return uniqueNonEmpty(paths)
 }

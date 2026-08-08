@@ -30,7 +30,7 @@ func defaultCompressOptions() CompressToolResultOptions {
 	return CompressToolResultOptions{
 		MinTokens:      800,
 		Aggressiveness: 0.5,
-		SkipTools:      []string{"Edit", "Write", "Patch", "Diff"},
+		SkipTools:      []string{"Edit", "MultiEdit", "Write", "MultiWrite", "Patch", "Diff"},
 	}
 }
 

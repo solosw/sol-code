@@ -168,7 +168,7 @@ func (s *Server) availableTools() []string {
 
 func defaultEditorTools() []string {
 	return []string{
-		"AskUser", "Bash", "Diff", "Edit", "Fetch", "Glob", "Grep",
+		"AskUser", "Bash", "Diff", "Edit", "MultiEdit", "MultiWrite", "Fetch", "Glob", "Grep",
 		"LS", "LSP", "Patch", "Skill", "Task", "TodoWrite",
 		"View", "ViewImage", "WebSearch", "Write",
 	}
@@ -316,7 +316,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	cfg := s.cfg.Settings()
 	resp := settingsResponse{
 		Provider:   cfg.Provider,
-		Model:      cfg.Model,
+		Model:      settingsModelName(cfg),
 		Effort:     cfg.Effort,
 		MaxTurns:   cfg.MaxTurns,
 		MaxContext: cfg.MaxContextTokens,
@@ -339,6 +339,20 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 		resp.Skills = s.cfg.Skills()
 	}
 	writeJSON(w, resp)
+}
+
+func settingsModelName(cfg config.Config) string {
+	for _, p := range cfg.Providers {
+		if p.Name != cfg.Provider {
+			continue
+		}
+		for _, m := range p.Models {
+			if m.Name == cfg.Model || m.ID == cfg.Model {
+				return m.Name
+			}
+		}
+	}
+	return cfg.Model
 }
 
 type settingsUpdate struct {
@@ -381,6 +395,7 @@ func (s *Server) postSettings(w http.ResponseWriter, r *http.Request) {
 	if req.MaxContext != nil {
 		next.MaxContextTokens = *req.MaxContext
 	}
+	applyActiveModelSettings(&next, req)
 
 	// MCP toggles
 	if len(req.MCPDisabled) > 0 {
@@ -420,6 +435,35 @@ func (s *Server) postSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+func applyActiveModelSettings(cfg *config.Config, req settingsUpdate) {
+	if cfg == nil {
+		return
+	}
+	for providerIndex := range cfg.Providers {
+		provider := &cfg.Providers[providerIndex]
+		if provider.Name != cfg.Provider {
+			continue
+		}
+		for modelIndex := range provider.Models {
+			model := &provider.Models[modelIndex]
+			if model.Name != cfg.Model && model.ID != cfg.Model {
+				continue
+			}
+			if req.MaxContext != nil {
+				model.MaxContextTokens = *req.MaxContext
+			}
+			if req.MaxTurns != nil {
+				maxTurns := *req.MaxTurns
+				model.MaxTurns = &maxTurns
+			}
+			if req.Effort != nil {
+				model.Effort = strings.TrimSpace(*req.Effort)
+			}
+			return
+		}
+	}
 }
 
 // ---- Providers add/delete ----

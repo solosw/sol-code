@@ -101,6 +101,24 @@ func conversationContext(timeout time.Duration) (context.Context, context.Cancel
 	return context.WithTimeout(context.Background(), timeout)
 }
 
+func isSkillEnabled(cfg config.SkillsConfig, name string) bool {
+	name = strings.TrimSpace(name)
+	for _, disabled := range cfg.Disabled {
+		if disabled == name {
+			return false
+		}
+	}
+	if len(cfg.Enabled) == 0 {
+		return true
+	}
+	for _, enabled := range cfg.Enabled {
+		if enabled == name {
+			return true
+		}
+	}
+	return false
+}
+
 func runBatch(cfg config.Config, prompt string, timeout time.Duration, maxTurns int) error {
 	application, err := app.New(cfg)
 	if err != nil {
@@ -658,10 +676,7 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 				available := skill.LoadFromDirs(cfg.Skills.Paths...).All()
 				out := make([]workflowui.SkillInfo, 0, len(available))
 				for _, def := range available {
-					enabled := false
-					if application.SkillRegistry != nil {
-						_, enabled = application.SkillRegistry.Find(def.Name)
-					}
+					enabled := isSkillEnabled(cfg.Skills, def.Name)
 					out = append(out, workflowui.SkillInfo{
 						Name:        def.Name,
 						Description: def.Description,

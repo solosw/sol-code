@@ -203,7 +203,7 @@ func isAcceptEditsTool(t tool.Tool) bool {
 		return false
 	}
 	switch t.Name() {
-	case tool.EditToolName, tool.WriteToolName, tool.PatchToolName, tool.TodoWriteToolName:
+	case tool.EditToolName, tool.MultiEditToolName, tool.WriteToolName, tool.MultiWriteToolName, tool.PatchToolName, tool.TodoWriteToolName:
 		return true
 	default:
 		return false

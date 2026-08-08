@@ -338,11 +338,6 @@ func Load(path string) (Config, error) {
 		if err := loadFile(&cfg, path); err != nil {
 			return cfg, err
 		}
-		// Runtime settings are user-scoped and always take precedence, even
-		// when the base configuration was selected with --config.
-		if err := loadOptionalFile(&cfg, DefaultRuntimeSettingsPath()); err != nil {
-			return cfg, err
-		}
 		if err := cfg.Normalize(); err != nil {
 			return cfg, err
 		}
@@ -1079,6 +1074,9 @@ func applyJSONConfig(cfg *Config, data []byte) error {
 			if err := applyMCPJSON(&cfg.MCP, value); err != nil {
 				return err
 			}
+			// Keep the legacy mirror synchronized so Normalize does not let an
+			// earlier mcp_servers layer overwrite this later mcp layer.
+			cfg.MCPServers = cloneMCPServers(cfg.MCP.Servers)
 		case "mcp_servers", "mcpServers":
 			servers, err := parseMCPServers(value)
 			if err != nil {

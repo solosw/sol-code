@@ -25,6 +25,17 @@ func (s stubTool) Invoke(context.Context, *tool.UseContext, json.RawMessage) (*t
 	return tool.Result("ok"), nil
 }
 
+func TestSelectToolsIncludesBatchFileTools(t *testing.T) {
+	all := []tool.Tool{
+		&stubTool{name: tool.MultiEditToolName, desc: "apply multiple exact file edits"},
+		&stubTool{name: tool.MultiWriteToolName, desc: "write multiple files"},
+	}
+	selected := SelectToolsForTurn(all, nil, "", nil)
+	if len(selected) != 2 || selected[0].Name() != tool.MultiEditToolName || selected[1].Name() != tool.MultiWriteToolName {
+		t.Fatalf("selected = %#v", selected)
+	}
+}
+
 func sampleTools() []tool.Tool {
 	return []tool.Tool{
 		&stubTool{name: tool.AskUserToolName, desc: "ask the user"},

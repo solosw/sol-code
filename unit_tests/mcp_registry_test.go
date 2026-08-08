@@ -117,13 +117,27 @@ func TestMCPRegistrySkipsDisabledServers(t *testing.T) {
 	}
 }
 
-func TestMCPRegistryReturnsStartupErrors(t *testing.T) {
-	registry := internalmcp.NewRegistry([]config.MCPServerConfig{{Name: "filesystem", Transport: "stdio", Command: "npx"}})
-	registry.SetClientFactory(func(server config.MCPServerConfig) internalmcp.Client {
-		return &fakeMCPClient{startErr: errors.New("boom")}
+func TestMCPRegistrySkipsFailingServer(t *testing.T) {
+	good := &fakeMCPClient{tools: []fakeToolDef{{name: "ping", description: "Ping", result: "pong"}}}
+	registry := internalmcp.NewRegistry([]config.MCPServerConfig{
+		{Name: "broken", Transport: "stdio", Command: "npx"},
+		{Name: "good", Transport: "stdio", Command: "npx"},
 	})
-	if err := registry.Load(); err == nil {
-		t.Fatal("expected startup error, got nil")
+	registry.SetClientFactory(func(server config.MCPServerConfig) internalmcp.Client {
+		if server.Name == "broken" {
+			return &fakeMCPClient{startErr: errors.New("boom")}
+		}
+		return good
+	})
+	if err := registry.Load(); err != nil {
+		t.Fatalf("Load() should skip failing servers, got: %v", err)
+	}
+	tools := registry.Tools()
+	if len(tools) != 1 || tools[0].Name() != "mcp__good__ping" {
+		t.Fatalf("expected only tools from the working server, got %#v", tools)
+	}
+	if err := registry.Close(); err != nil {
+		t.Fatalf("Close() = %v", err)
 	}
 }
 

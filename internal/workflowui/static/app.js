@@ -907,10 +907,8 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      settings.data = copySettings(d);
-      clearSettingsDirty();
-      renderSettingsV2();
-      setSettingsStatus("Settings saved. Applying runtime changes in the background.", "ok");
+      await loadSettingsV2();
+      setSettingsStatus("Settings saved and verified. Applying runtime changes in the background.", "ok");
     } catch (err) {
       setSettingsStatus(String(err.message || err), "err");
     }

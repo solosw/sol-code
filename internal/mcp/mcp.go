@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -56,32 +57,42 @@ func (r *Registry) LoadContext(ctx context.Context) error {
 			continue
 		}
 		if err := validateServerConfig(server); err != nil {
-			return err
+			fmt.Fprintf(os.Stderr, "warning: skipping mcp server %q: %v\n", server.Name, err)
+			continue
 		}
 
 		client := r.factory(server)
 		if client == nil {
-			return fmt.Errorf("mcp server %q client factory returned nil", server.Name)
+			fmt.Fprintf(os.Stderr, "warning: skipping mcp server %q: client factory returned nil\n", server.Name)
+			continue
 		}
 		if err := client.Start(ctx); err != nil {
 			_ = client.Close()
-			return err
+			fmt.Fprintf(os.Stderr, "warning: skipping mcp server %q: %v\n", server.Name, err)
+			continue
 		}
 
 		infos, err := client.ListTools(ctx)
 		if err != nil {
 			_ = client.Close()
-			return fmt.Errorf("list tools for mcp server %q: %w", server.Name, err)
+			fmt.Fprintf(os.Stderr, "warning: skipping mcp server %q: list tools: %v\n", server.Name, err)
+			continue
 		}
 
 		serverName := server.Name
+		duplicate := false
 		for _, info := range infos {
 			qualified := tool.MCPToolName(serverName, info.ToolName)
 			if prior, exists := seenToolNames[qualified]; exists {
 				_ = client.Close()
-				return fmt.Errorf("duplicate mcp tool name %q from servers %q and %q", qualified, prior, serverName)
+				fmt.Fprintf(os.Stderr, "warning: skipping mcp server %q: duplicate tool name %q already from %q\n", serverName, qualified, prior)
+				duplicate = true
+				break
 			}
 			seenToolNames[qualified] = serverName
+		}
+		if duplicate {
+			continue
 		}
 
 		mcpTools := tool.RegisterMCPTools(serverName, infos, func(toolName string) func(context.Context, json.RawMessage) (*tool.ContentBlock, error) {

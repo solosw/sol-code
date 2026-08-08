@@ -468,7 +468,7 @@ func shouldDropTool(name string) bool {
 
 func shouldPreserveToolUse(name string) bool {
 	switch strings.TrimSpace(name) {
-	case "Edit", "Write", "Patch", "Diff":
+	case "Edit", "MultiEdit", "Write", "MultiWrite", "Patch", "Diff":
 		return true
 	default:
 		return false

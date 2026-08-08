@@ -18,6 +18,8 @@ var coreToolNames = map[string]bool{
 	tool.BashToolName:       true,
 	tool.DiffToolName:       true,
 	tool.EditToolName:       true,
+	tool.MultiEditToolName:  true,
+	tool.MultiWriteToolName: true,
 	tool.GlobToolName:       true,
 	tool.GrepToolName:       true,
 	tool.LSToolName:         true,

@@ -219,6 +219,10 @@ func TestLoadLegacyFlatJSON(t *testing.T) {
 	}
 }
 
+func intPointer(value int) *int {
+	return &value
+}
+
 func TestUserPersistencePathOverridesProjectSettings(t *testing.T) {
 	dir := t.TempDir()
 	home := filepath.Join(dir, "home")
@@ -250,7 +254,8 @@ func TestUserPersistencePathOverridesProjectSettings(t *testing.T) {
 	writeFile(t, filepath.Join(project, ".solcode", "settings.json"), `{
   "provider": "project",
   "model": "project-model",
-  "providers": [{"name":"project","base_url":"https://project.example","models":[{"name":"project-model","id":"project-model"}]}]
+  "providers": [{"name":"project","base_url":"https://project.example","models":[{"name":"project-model","id":"project-model"}]}],
+  "mcp_servers": [{"name":"legacy","command":"legacy-command"}]
 }`)
 
 	path := config.PersistencePath("", project)
@@ -267,9 +272,19 @@ func TestUserPersistencePathOverridesProjectSettings(t *testing.T) {
 		"providers": []config.ProviderConfig{{
 			Name:    "saved",
 			BaseURL: "https://saved.example",
-			Models:  []config.ModelConfig{{Name: "saved-model", ID: "saved-model"}},
+			Models: []config.ModelConfig{{
+				Name:             "saved-model",
+				ID:               "saved-model",
+				MaxContextTokens: 256_000,
+				MaxTurns:         intPointer(42),
+				Effort:           "low",
+			}},
 		}},
-		"effort": "low",
+		"effort":             "low",
+		"max_turns":          42,
+		"max_context_tokens": 256_000,
+		"mcp":                map[string]any{"servers": []config.MCPServerConfig{{Name: "legacy", Command: "legacy-command", Disabled: true}}},
+		"skills":             map[string]any{"enabled": []string{"enabled-skill"}, "disabled": []string{"disabled-skill"}},
 	}); err != nil {
 		t.Fatalf("SaveLocalOverrides() = %v", err)
 	}
@@ -281,19 +296,14 @@ func TestUserPersistencePathOverridesProjectSettings(t *testing.T) {
 	if cfg.Provider != "saved" || cfg.Model != "saved-model" || cfg.Effort != "low" {
 		t.Fatalf("reloaded config = provider %q, model %q, effort %q", cfg.Provider, cfg.Model, cfg.Effort)
 	}
-
-	explicitPath := filepath.Join(project, "explicit.json")
-	writeFile(t, explicitPath, `{
-  "provider": "project",
-  "model": "project-model",
-  "providers": [{"name":"project","base_url":"https://project.example","models":[{"name":"project-model","id":"project-model"}]}]
-}`)
-	cfg, err = config.Load(explicitPath)
-	if err != nil {
-		t.Fatalf("Load(explicit) = %v", err)
+	if cfg.MaxContextTokens != 256_000 || cfg.MaxTurns != 42 {
+		t.Fatalf("reloaded limits = context %d, turns %d", cfg.MaxContextTokens, cfg.MaxTurns)
 	}
-	if cfg.Provider != "saved" || cfg.Model != "saved-model" || cfg.Effort != "low" {
-		t.Fatalf("explicit config with user override = provider %q, model %q, effort %q", cfg.Provider, cfg.Model, cfg.Effort)
+	if len(cfg.MCP.Servers) != 1 || cfg.MCP.Servers[0].Name != "legacy" || !cfg.MCP.Servers[0].Disabled {
+		t.Fatalf("reloaded MCP state = %#v", cfg.MCP.Servers)
+	}
+	if len(cfg.Skills.Enabled) != 1 || cfg.Skills.Enabled[0] != "enabled-skill" || len(cfg.Skills.Disabled) != 1 || cfg.Skills.Disabled[0] != "disabled-skill" {
+		t.Fatalf("reloaded skill state = enabled %#v, disabled %#v", cfg.Skills.Enabled, cfg.Skills.Disabled)
 	}
 }
 

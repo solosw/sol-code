@@ -237,7 +237,7 @@ func writeToolOutput(b *strings.Builder, msg ChatMessage, t Theme, width int) {
 func isFileViewTool(toolName string) bool {
 	switch toolName {
 	case "View", "Read", "mcp__filesystem__read-text-file", "mcp__filesystem__read-file",
-		"mcp__filesystem__read-multiple-files", "Edit", "Write", "Patch":
+		"mcp__filesystem__read-multiple-files", "Edit", "MultiEdit", "Write", "MultiWrite", "Patch":
 		return true
 	}
 	return false

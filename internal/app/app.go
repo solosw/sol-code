@@ -97,7 +97,10 @@ func buildToolState(cfg config.Config, mcpFactory mcp.ClientFactory) (*tool.Regi
 		mcpRegistry.SetClientFactory(mcpFactory)
 	}
 	if err := mcpRegistry.Load(); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("load mcp registry: %w", err)
+		// MCP servers that fail to connect are already reported as warnings
+		// by LoadContext. Do not block app startup when one or more servers
+		// are unreachable.
+		_ = err
 	}
 	if mcpTools := mcpRegistry.Tools(); len(mcpTools) > 0 {
 		registry.Register(mcpTools...)
@@ -165,8 +168,9 @@ func New(cfg config.Config, opts ...Option) (*App, error) {
 	}
 	graphStore, err := openChangeGraph(cfg)
 	if err != nil {
-		_ = mcpRegistry.Close()
-		return nil, err
+		// Knowledge graph is optional; do not block startup when it fails.
+		fmt.Fprintf(os.Stderr, "warning: knowledge graph disabled: %v\n", err)
+		graphStore = nil
 	}
 
 	runtime := hook.NewRuntime(cfg.Hooks)
@@ -2670,6 +2674,8 @@ func registerBuiltins(registry *tool.Registry, lspManager *lsp.Manager, sandboxP
 		tool.NewBashToolWithSandbox(sandboxPolicy),
 		tool.NewDiffTool(),
 		tool.NewEditTool(),
+		tool.NewMultiEditTool(),
+		tool.NewMultiWriteTool(),
 		tool.NewFetchTool(),
 		tool.NewGlobTool(),
 		tool.NewGrepTool(),

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 )
@@ -17,13 +18,13 @@ import (
 // transport. Only fields we emit or consume are modeled.
 
 type openAIChatRequest struct {
-	Model            string              `json:"model"`
-	Messages         []openAIChatMessage `json:"messages"`
-	Tools            []openAITool        `json:"tools,omitempty"`
-	MaxTokens        int64               `json:"max_tokens,omitempty"`
-	Stream           bool                `json:"stream,omitempty"`
-	StreamOptions    *openAIStreamOpts   `json:"stream_options,omitempty"`
-	ReasoningEffort  string              `json:"reasoning_effort,omitempty"`
+	Model           string              `json:"model"`
+	Messages        []openAIChatMessage `json:"messages"`
+	Tools           []openAITool        `json:"tools,omitempty"`
+	MaxTokens       int64               `json:"max_tokens,omitempty"`
+	Stream          bool                `json:"stream,omitempty"`
+	StreamOptions   *openAIStreamOpts   `json:"stream_options,omitempty"`
+	ReasoningEffort string              `json:"reasoning_effort,omitempty"`
 	// Extra passthrough for gateways that accept Anthropic-ish extensions.
 	Thinking *openAIThinking `json:"thinking,omitempty"`
 }
@@ -123,18 +124,6 @@ func (c *Client) createOpenAI(ctx context.Context, req MessageRequest) (*sdk.Mes
 		return nil, fmt.Errorf("marshal openai request: %w", err)
 	}
 	endpoint := c.baseURL + "/v1/chat/completions"
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(raw))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	if c.apiKey != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
-	}
-	if req.Stream {
-		httpReq.Header.Set("Accept", "text/event-stream")
-	}
-
 	client := c.http
 	if client == nil {
 		client = http.DefaultClient
@@ -142,7 +131,7 @@ func (c *Client) createOpenAI(ctx context.Context, req MessageRequest) (*sdk.Mes
 	if !req.Stream {
 		client = c.idleHTTPClient()
 	}
-	resp, err := client.Do(httpReq)
+	resp, err := doOpenAIRequest(ctx, client, endpoint, raw, c.apiKey, req.Stream)
 	if err != nil {
 		return nil, err
 	}
@@ -155,6 +144,68 @@ func (c *Client) createOpenAI(ctx context.Context, req MessageRequest) (*sdk.Mes
 		return c.consumeOpenAIStream(resp.Body, req)
 	}
 	return decodeOpenAIResponse(resp.Body)
+}
+
+const openAIMaxRetries = 5
+
+var openAIRetryDelay = 5 * time.Second
+
+func doOpenAIRequest(ctx context.Context, client *http.Client, endpoint string, body []byte, apiKey string, stream bool) (*http.Response, error) {
+	var lastErr error
+	for attempt := 0; attempt <= openAIMaxRetries; attempt++ {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		if apiKey != "" {
+			httpReq.Header.Set("Authorization", "Bearer "+apiKey)
+		}
+		if stream {
+			httpReq.Header.Set("Accept", "text/event-stream")
+		}
+
+		resp, err := client.Do(httpReq)
+		if err == nil && !isRetryableOpenAIStatus(resp.StatusCode) {
+			return resp, nil
+		}
+		if err == nil {
+			lastErr = openAIResponseError(resp)
+			_ = resp.Body.Close()
+		} else {
+			lastErr = err
+		}
+		if attempt == openAIMaxRetries || ctx.Err() != nil {
+			break
+		}
+		if err := waitOpenAIRetry(ctx, openAIRetryDelay); err != nil {
+			return nil, err
+		}
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return nil, fmt.Errorf("openai chat/completions failed after %d retries: %w", openAIMaxRetries, lastErr)
+}
+
+func isRetryableOpenAIStatus(status int) bool {
+	return status == http.StatusRequestTimeout || status == http.StatusTooManyRequests || status >= http.StatusInternalServerError
+}
+
+func openAIResponseError(resp *http.Response) error {
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	return fmt.Errorf("openai chat/completions %s: %s", resp.Status, strings.TrimSpace(string(body)))
+}
+
+func waitOpenAIRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func buildOpenAIRequest(req MessageRequest) (openAIChatRequest, error) {

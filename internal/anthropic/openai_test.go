@@ -1,15 +1,90 @@
 package anthropic
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 )
+
+func TestOpenAIRequestRetriesRetryableStatus(t *testing.T) {
+	previousDelay := openAIRetryDelay
+	openAIRetryDelay = 0
+	t.Cleanup(func() { openAIRetryDelay = previousDelay })
+
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts <= 2 {
+			http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	resp, err := doOpenAIRequest(context.Background(), server.Client(), server.URL, []byte(`{"model":"test"}`), "key", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || attempts != 3 {
+		t.Fatalf("status = %d, attempts = %d; want 200 and 3", resp.StatusCode, attempts)
+	}
+}
+
+func TestOpenAIRequestDoesNotRetryNonRetryableStatus(t *testing.T) {
+	previousDelay := openAIRetryDelay
+	openAIRetryDelay = 0
+	t.Cleanup(func() { openAIRetryDelay = previousDelay })
+
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		http.Error(w, "invalid request", http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	resp, err := doOpenAIRequest(context.Background(), server.Client(), server.URL, []byte(`{"model":"test"}`), "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest || attempts != 1 {
+		t.Fatalf("status = %d, attempts = %d; want 400 and 1", resp.StatusCode, attempts)
+	}
+}
+
+func TestOpenAIRequestStopsRetryingWhenCancelled(t *testing.T) {
+	previousDelay := openAIRetryDelay
+	openAIRetryDelay = time.Hour
+	t.Cleanup(func() { openAIRetryDelay = previousDelay })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		cancel()
+		http.Error(w, "temporarily unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	_, err := doOpenAIRequest(ctx, server.Client(), server.URL, []byte(`{"model":"test"}`), "", false)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context cancellation", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+}
 
 func TestNormalizeFormat(t *testing.T) {
 	if got := NormalizeFormat(""); got != FormatAnthropic {
@@ -196,7 +271,6 @@ func TestOpenAIClientCreateStream(t *testing.T) {
 		t.Fatalf("cache read = %d", msg.Usage.CacheReadInputTokens)
 	}
 }
-
 
 func TestBuildOpenAIRequestMapsViewImageToolResult(t *testing.T) {
 	// Tiny 1x1 PNG base64

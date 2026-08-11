@@ -9,13 +9,14 @@ A terminal-based coding agent powered by Claude (Anthropic API) that can read, w
 - **Persistent sessions** — Reload saved conversation history with its original message timestamps.
 - **Batch mode** — Run one-shot prompts non-interactively via `-prompt`.
 - **Multi-model support** — Configure multiple LLM providers and models, switch at runtime with `/model` (current provider only) and `/provider`, or add them directly from their dialogs.
+- **Native Anthropic transport** — The Anthropic Messages API uses a handwritten HTTP/JSON/SSE client, including streaming text, thinking, and tool-input deltas; the official SDK remains only for internal message compatibility.
 - **20+ built-in tools** — Bash, Edit, Write, View, ViewImage, Grep, Glob, LS, Diff, Patch, Fetch, WebSearch, LSP, MCP, TodoWrite, WriteMemory, ReadMemory, AskUser, Task (sub-agents), and more.
 - **MCP (Model Context Protocol)** — Connect to external MCP servers over stdio or HTTP.
 - **Custom skills** — Define reusable skill files loaded from configurable directories.
 - **Hook system** — Execute shell commands on agent events (tool calls, results, completion).
 - **Permission modes** — `auto`, `accept_edits`, `bypass`, `yolo`, `plan` — control how tools are authorized.
 - **Sub-agent coordinator** — The `task` tool spawns isolated sub-agents for parallel or independent work.
-- **LSP integration** — Multi-language code intelligence via Language Server Protocol: go-to-definition, find references, hover, document/workspace symbols, and go-to-implementation. Language servers are launched by file extension (gopls, pyright, typescript-language-server, …); binaries on `PATH` are auto-detected, and you can override commands in settings.
+- **LSP integration** — Multi-language code intelligence via Language Server Protocol: go-to-definition, find references, hover, document/workspace symbols, and go-to-implementation. When enabled, `LSP` is a core model-visible tool on every turn. Language servers are launched by file extension (gopls, pyright, typescript-language-server, …); binaries on `PATH` are auto-detected, and you can override commands in settings.
 - **Inline diff rendering** — File edits (Edit/Write/Patch) show colored unified diffs directly in the TUI.
 - **Syntax highlighting** — File content displayed in the TUI is syntax-highlighted via Chroma for 200+ languages.
 
@@ -392,6 +393,10 @@ In `~/.solcode/settings.json` or project `.solcode/settings.json`:
 
 Sessions are reused per `(workDir, language)` for the life of the process and shut down on app exit / feature reload.
 
+### Anthropic Messages transport
+
+For `api_format: "anthropic"` (the default), solcode sends native Messages API requests through its own HTTP/JSON transport rather than the official SDK client. It supports non-streaming responses and SSE streams, including text, thinking, and incremental `tool_use` JSON input. Before a response body is consumed, transient transport failures and HTTP `408`, `409`, `429`, and `5xx` responses are retried up to five times with capped exponential backoff; `Retry-After` is honored when present. Existing engine and session code continues to use SDK-shaped message types as a compatibility boundary.
+
 See also [`examples/settings/settings.full.example.json`](examples/settings/settings.full.example.json).
 
 ## Built-in Tools
@@ -410,7 +415,7 @@ See also [`examples/settings/settings.full.example.json`](examples/settings/sett
 | `patch` | Apply unified diff patches |
 | `fetch` | Fetch content from URLs |
 | `web_search` | Search the web and return structured results |
-| `LSP` | Language intelligence: definition, references, hover, symbols (see [LSP](#lsp-language-server-protocol)) |
+| `LSP` | Core read-only language intelligence: definition, references, hover, and symbols (see [LSP](#lsp-language-server-protocol)) |
 | `mcp` | Invoke MCP server tools |
 | `todo_write` | Manage structured task lists |
 | `ask_user` | Ask user questions in interactive dialogs |

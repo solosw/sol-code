@@ -36,6 +36,13 @@ func TestSelectToolsIncludesBatchFileTools(t *testing.T) {
 	}
 }
 
+func TestSelectToolsIncludesLSP(t *testing.T) {
+	selected := SelectToolsForTurn([]tool.Tool{&stubTool{name: "LSP", desc: "Language Server Protocol operations"}}, nil, "", nil)
+	if len(selected) != 1 || selected[0].Name() != "LSP" {
+		t.Fatalf("LSP core tool missing: %#v", selected)
+	}
+}
+
 func sampleTools() []tool.Tool {
 	return []tool.Tool{
 		&stubTool{name: tool.AskUserToolName, desc: "ask the user"},

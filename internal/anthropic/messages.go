@@ -22,6 +22,60 @@ type MessageRequest struct {
 	OnThinkingDelta func(string)
 }
 
+// MarshalJSON writes the native Messages API request without using the SDK client.
+// SDK block types remain at the public boundary while the wire envelope is owned here.
+func (r MessageRequest) MarshalJSON() ([]byte, error) {
+	model := strings.TrimSpace(r.Model)
+	if model == "" {
+		model = DefaultModel
+	}
+	maxTokens := r.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 16_000
+	}
+	type cacheControl struct {
+		Type string `json:"type"`
+		TTL  string `json:"ttl,omitempty"`
+	}
+	type systemBlock struct {
+		Type         string       `json:"type"`
+		Text         string       `json:"text"`
+		CacheControl cacheControl `json:"cache_control"`
+	}
+	body := struct {
+		Model        string               `json:"model"`
+		MaxTokens    int64                `json:"max_tokens"`
+		Messages     []sdk.MessageParam   `json:"messages"`
+		Tools        []sdk.ToolUnionParam `json:"tools,omitempty"`
+		System       []systemBlock        `json:"system,omitempty"`
+		Thinking     any                  `json:"thinking,omitempty"`
+		OutputConfig map[string]string    `json:"output_config,omitempty"`
+		Stream       bool                 `json:"stream,omitempty"`
+		CacheControl cacheControl         `json:"cache_control"`
+	}{
+		Model:        model,
+		MaxTokens:    maxTokens,
+		Messages:     r.Messages,
+		Tools:        withLastToolCacheBreakpoint(r.Tools),
+		Stream:       r.Stream,
+		CacheControl: cacheControl{Type: "ephemeral", TTL: "1h"},
+	}
+	if r.System != "" {
+		body.System = []systemBlock{{Type: "text", Text: r.System, CacheControl: cacheControl{Type: "ephemeral", TTL: "1h"}}}
+	}
+	if r.Thinking {
+		thinking := map[string]any{"type": "adaptive"}
+		if r.ThinkingText {
+			thinking["display"] = "summarized"
+		}
+		body.Thinking = thinking
+	}
+	if effort := strings.TrimSpace(r.Effort); effort != "" {
+		body.OutputConfig = map[string]string{"effort": effort}
+	}
+	return json.Marshal(body)
+}
+
 func (r MessageRequest) ToSDKParams() sdk.MessageNewParams {
 	model := r.Model
 	if model == "" {
@@ -63,7 +117,6 @@ func (r MessageRequest) ToSDKParams() sdk.MessageNewParams {
 	}
 	return params
 }
-
 
 func ephemeralCacheControl() sdk.CacheControlEphemeralParam {
 	// 1h keeps tools/system warm across normal turn gaps; default 5m expires too easily.

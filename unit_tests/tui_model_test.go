@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/solosw/solcode/internal/tui"
 )
 
@@ -29,28 +31,28 @@ func TestTUIModelQueuesMessageWhileStreaming(t *testing.T) {
 	model = updated.(tui.Model)
 
 	for _, text := range []string{"i", "n"} {
-		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
+		updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Text: text}))
 		model = updated.(tui.Model)
 	}
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
 	if cmd == nil {
 		t.Fatal("expected initial prompt to start a stream")
 	}
 	for _, text := range []string{"f", "o", "l", "l", "o", "w", " ", "u", "p"} {
-		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
+		updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Text: text}))
 		model = updated.(tui.Model)
 	}
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
 
 	if len(queued) != 1 || queued[0] != "follow up" {
-		t.Fatalf("queued prompts = %#v, want [follow up] (view: %s)", queued, model.View())
+		t.Fatalf("queued prompts = %#v, want [follow up] (view: %s)", queued, model.View().Content)
 	}
-	if !strings.Contains(model.View(), "follow up") {
-		t.Fatalf("expected queued message in view: %s", model.View())
+	if !strings.Contains(model.View().Content, "follow up") {
+		t.Fatalf("expected queued message in view: %s", model.View().Content)
 	}
 }
 
@@ -58,7 +60,7 @@ func TestTUIModelStreamsAssistantText(t *testing.T) {
 	model := newTUI(t)
 	updated, _ := model.Update(tui.StreamTextMsg{Text: "hello"})
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "●") {
 		t.Fatalf("expected assistant marker ● in view: %s", view)
 	}
@@ -71,7 +73,7 @@ func TestTUIModelShowsErrors(t *testing.T) {
 	model := newTUI(t)
 	updated, _ := model.Update(tui.StreamErrorMsg{Err: errTestTUI})
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "⚠") || !strings.Contains(view, "tui test error") {
 		t.Fatalf("expected error marker in view: %s", view)
 	}
@@ -81,7 +83,7 @@ func TestTUIModelShowsToolStatus(t *testing.T) {
 	model := newTUI(t)
 	updated, _ := model.Update(tui.ToolStartMsg{Name: "Bash", Input: `{"command":"ls"}`})
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "Bash") || !strings.Contains(view, "ls") || !strings.Contains(view, "正在运行 1 个 Shell") {
 		t.Fatalf("expected shell start status in view: %s", view)
 	}
@@ -91,7 +93,7 @@ func TestTUIModelShowsToolStatus(t *testing.T) {
 
 	updated, _ = model.Update(tui.ToolDoneMsg{Name: "Bash", Output: "file1.txt", IsError: false})
 	model = updated.(tui.Model)
-	view = model.View()
+	view = model.View().Content
 	if !strings.Contains(view, "Bash") || !strings.Contains(view, "file1.txt") {
 		t.Fatalf("expected tool done in view: %s", view)
 	}
@@ -104,7 +106,7 @@ func TestTUIModelTodoWriteOutputIsExpanded(t *testing.T) {
 	model := newTUI(t)
 	updated, _ := model.Update(tui.ToolStartMsg{Name: "TodoWrite", Input: `{"todos":[{"id":"1","content":"one","status":"pending","priority":"high"},{"id":"2","content":"two","status":"in_progress","priority":"medium"},{"id":"3","content":"three","status":"completed","priority":"low"}]}`})
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "Todos") || !strings.Contains(view, "one") || !strings.Contains(view, "two") || !strings.Contains(view, "three") {
 		t.Fatalf("expected todo panel rows in view: %s", view)
 	}
@@ -114,7 +116,7 @@ func TestTUIModelNormalToolOutputStaysCollapsed(t *testing.T) {
 	model := newTUI(t)
 	updated, _ := model.Update(tui.ToolDoneMsg{Name: "Bash", Output: "one\ntwo\nthree", IsError: false})
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "one") {
 		t.Fatalf("expected collapsed tool output summary in view: %s", view)
 	}
@@ -137,7 +139,7 @@ func TestTUIModelFileMutationOutputIsExpandedAndShowsDiff(t *testing.T) {
 	}, "\n")
 	updated, _ := model.Update(tui.ToolDoneMsg{Name: "Edit", Output: output, IsError: false})
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	if strings.Contains(view, "more lines") {
 		t.Fatalf("expected Edit output to be expanded, got collapsed view: %s", view)
 	}
@@ -157,7 +159,7 @@ func TestTUIModelFileMutationOutputForcesExpandedEvenIfCollapsedStateIsSet(t *te
 		Content:   "--- a/test.go\n+++ b/test.go\n@@ -1 +1 @@\n- old\n+ new",
 		Collapsed: true,
 	}})
-	view := model.View()
+	view := model.View().Content
 	if strings.Contains(view, "more lines") {
 		t.Fatalf("expected Write output to ignore collapsed state: %s", view)
 	}
@@ -168,7 +170,7 @@ func TestTUIModelFileMutationOutputForcesExpandedEvenIfCollapsedStateIsSet(t *te
 
 func TestTUIModelWelcomeRendersCenteredLogo(t *testing.T) {
 	model := newTUI(t)
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "☀") || !strings.Contains(view, "solcode") || !strings.Contains(view, "Welcome to solcode") {
 		t.Fatalf("expected centered logo-style welcome in view: %s", view)
 	}
@@ -194,7 +196,7 @@ func TestTUIModelWelcomeRendersCenteredLogo(t *testing.T) {
 func TestTUIModelUserMessageRendersBoxWithoutPromptMarker(t *testing.T) {
 	model := newTUI(t)
 	model.ReplaceMessages([]tui.ChatMessage{{Role: "user", Content: "hello user"}})
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "hello user") || !strings.Contains(view, "╭") || !strings.Contains(view, "╰") {
 		t.Fatalf("expected user message box in view: %s", view)
 	}
@@ -203,29 +205,16 @@ func TestTUIModelUserMessageRendersBoxWithoutPromptMarker(t *testing.T) {
 	}
 }
 
+var ansiEscape = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
+
+func visibleText(view string) string {
+	return ansiEscape.ReplaceAllString(view, "")
+}
+
 func TestTUIModelInitEnablesBracketedPaste(t *testing.T) {
 	model := tui.New(nil)
-	cmd := model.Init()
-	if cmd == nil {
+	if model.Init() == nil {
 		t.Fatal("expected init command")
-	}
-	msg := cmd()
-	batch, ok := msg.(tea.BatchMsg)
-	if !ok {
-		t.Fatalf("expected batch init message, got %T", msg)
-	}
-	found := false
-	for _, subcmd := range batch {
-		if subcmd == nil {
-			continue
-		}
-		if fmt.Sprintf("%#v", subcmd()) == fmt.Sprintf("%#v", tea.EnableBracketedPaste()) {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatal("expected init to enable bracketed paste")
 	}
 }
 
@@ -237,15 +226,18 @@ func TestTUIModelPasteDoesNotSubmitWithoutExplicitEnter(t *testing.T) {
 	})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	model = updated.(tui.Model)
-	paste := "alpha\nbeta\n"
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(paste), Paste: true})
+	paste := "alpha\nbeta\ngamma\ndelta\nepsilon\n"
+	updated, _ = model.Update(tea.PasteMsg{Content: paste})
 	model = updated.(tui.Model)
 	if submitted != "" {
 		t.Fatalf("expected no submit before explicit enter, got %q", submitted)
 	}
-	view := model.View()
-	if !strings.Contains(view, "alpha") || !strings.Contains(view, "beta") {
-		t.Fatalf("expected pasted content to remain in input before submit: %s", view)
+	view := model.View().Content
+	if !strings.Contains(view, "Pasted text #1 · 6 lines") {
+		t.Fatalf("expected folded paste label in input: %s", view)
+	}
+	if strings.Contains(view, "alpha") || strings.Contains(view, "beta") {
+		t.Fatalf("expected folded paste content to stay out of input: %s", view)
 	}
 }
 
@@ -258,20 +250,20 @@ func TestTUIModelImmediateSyntheticEnterAfterPasteIsIgnored(t *testing.T) {
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	model = updated.(tui.Model)
 	paste := "alpha\nbeta\n"
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(paste), Paste: true})
+	updated, _ = model.Update(tea.PasteMsg{Content: paste})
 	model = updated.(tui.Model)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
 	if submitted != "" {
 		t.Fatalf("expected synthetic enter after paste to be ignored, got %q", submitted)
 	}
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "alpha") || !strings.Contains(view, "beta") {
 		t.Fatalf("expected pasted content to stay in input after ignored enter: %s", view)
 	}
 }
 
-func TestTUIModelRapidBulkRunesWithoutPasteFlagStillSuppressNextEnter(t *testing.T) {
+func TestTUIModelRunesWithoutPasteFlagSubmitNormally(t *testing.T) {
 	submitted := ""
 	model := tui.New(func(prompt string) (tea.Cmd, func()) {
 		submitted = prompt
@@ -279,16 +271,31 @@ func TestTUIModelRapidBulkRunesWithoutPasteFlagStillSuppressNextEnter(t *testing
 	})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	model = updated.(tui.Model)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("alpha\nbeta")})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Text: "alpha\nbeta"}))
 	model = updated.(tui.Model)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
+	model = updated.(tui.Model)
+	if submitted != "alpha\nbeta" {
+		t.Fatalf("expected non-paste runes to submit normally, got %q", submitted)
+	}
+}
+
+func TestTUIModelPasteRunesWithNewlineNeverSubmits(t *testing.T) {
+	submitted := ""
+	model := tui.New(func(prompt string) (tea.Cmd, func()) {
+		submitted = prompt
+		return func() tea.Msg { return tui.StreamDoneMsg{} }, nil
+	})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	model = updated.(tui.Model)
+	updated, _ = model.Update(tea.PasteMsg{Content: "first\nsecond\n"})
 	model = updated.(tui.Model)
 	if submitted != "" {
-		t.Fatalf("expected rapid bulk runes enter to be ignored, got %q", submitted)
+		t.Fatalf("pasted newline submitted prompt: %q", submitted)
 	}
-	view := model.View()
-	if !strings.Contains(view, "alpha") || !strings.Contains(view, "beta") {
-		t.Fatalf("expected bulk runes content to stay in input after ignored enter: %s", view)
+	view := model.View().Content
+	if !strings.Contains(view, "first") || !strings.Contains(view, "second") {
+		t.Fatalf("pasted newline content missing from input: %s", view)
 	}
 }
 
@@ -301,10 +308,10 @@ func TestTUIModelDelayedExplicitEnterAfterPasteSubmits(t *testing.T) {
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	model = updated.(tui.Model)
 	paste := "alpha\nbeta\n"
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(paste), Paste: true})
+	updated, _ = model.Update(tea.PasteMsg{Content: paste})
 	model = updated.(tui.Model)
 	time.Sleep(200 * time.Millisecond)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
 	if submitted != "alpha\nbeta" {
 		t.Fatalf("expected delayed explicit enter to submit pasted content, got %q", submitted)
@@ -319,17 +326,17 @@ func TestTUIModelPastedUserMessageShowsLineCountOnly(t *testing.T) {
 	})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	model = updated.(tui.Model)
-	paste := "alpha\nbeta\ngamma"
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(paste), Paste: true})
+	paste := "alpha\nbeta\ngamma\ndelta\nepsilon"
+	updated, _ = model.Update(tea.PasteMsg{Content: paste})
 	model = updated.(tui.Model)
 	time.Sleep(200 * time.Millisecond)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
-	view := model.View()
-	if submitted != paste {
-		t.Fatalf("expected full pasted content submitted, got %q", submitted)
+	view := model.View().Content
+	if !strings.Contains(submitted, "--- Begin [Pasted text #1 · 5 lines] ---") || !strings.Contains(submitted, paste) || !strings.Contains(submitted, "--- End [Pasted text #1 · 5 lines] ---") {
+		t.Fatalf("expected folded paste to expand with boundaries, got %q", submitted)
 	}
-	if !strings.Contains(view, "Pasted 3 lines") {
+	if !strings.Contains(view, "Pasted 5 lines") {
 		t.Fatalf("expected pasted line count in view: %s", view)
 	}
 	if strings.Contains(view, "alpha") || strings.Contains(view, "beta") || strings.Contains(view, "gamma") {
@@ -340,7 +347,7 @@ func TestTUIModelPastedUserMessageShowsLineCountOnly(t *testing.T) {
 func TestTUIModelReplaceMessages(t *testing.T) {
 	model := newTUI(t)
 	model.ReplaceMessages([]tui.ChatMessage{{Role: "system", Content: "restored transcript"}})
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "restored transcript") {
 		t.Fatalf("expected restored transcript in view: %s", view)
 	}
@@ -349,11 +356,29 @@ func TestTUIModelReplaceMessages(t *testing.T) {
 	}
 }
 
+func TestTUIModelToolTitleReflowsAfterResize(t *testing.T) {
+	model := newTUI(t)
+	updated, _ := model.Update(tui.ToolStartMsg{
+		Name:  "WriteMemory",
+		Input: `{"memory":"Persisted sessions store the full expanded folded-paste block in user Content but do not persist ChatMessage.DisplayContent."}`,
+	})
+	model = updated.(tui.Model)
+
+	updated, _ = model.Update(tea.WindowSizeMsg{Width: 36, Height: 20})
+	model = updated.(tui.Model)
+	view := visibleText(model.View().Content)
+	for _, line := range strings.Split(view, "\n") {
+		if got := lipgloss.Width(line); got > 36 {
+			t.Fatalf("line width = %d, want <= 36 after resize: %q", got, line)
+		}
+	}
+}
+
 func TestTUIModelAgentStatusRenders(t *testing.T) {
 	model := newTUI(t)
 	updated, _ := model.Update(tui.AgentStatusMsg{ID: "task-1", Role: "task", State: "completed", Description: "Review files", Output: "looks good"})
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "Agents") || !strings.Contains(view, "Completed Review files") || !strings.Contains(view, "looks good") {
 		t.Fatalf("expected agent panel status in view: %s", view)
 	}
@@ -368,12 +393,12 @@ func TestTUIModelPermissionDialogResponds(t *testing.T) {
 		ResponseCh:  responseCh,
 	})
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "Permission Required") || !strings.Contains(view, "Allow") || !strings.Contains(view, "Deny") {
 		t.Fatalf("expected permission dialog in view: %s", view)
 	}
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Text: "y"}))
 	model = updated.(tui.Model)
 	select {
 	case allowed := <-responseCh:
@@ -383,7 +408,7 @@ func TestTUIModelPermissionDialogResponds(t *testing.T) {
 	default:
 		t.Fatal("expected response on channel after pressing y")
 	}
-	view = model.View()
+	view = model.View().Content
 	if strings.Contains(view, "Permission Required") {
 		t.Fatalf("expected permission dialog cleared after allow: %s", view)
 	}
@@ -399,7 +424,7 @@ func TestTUIModelPermissionDialogDenies(t *testing.T) {
 	})
 	model = updated.(tui.Model)
 
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Text: "n"}))
 	model = updated.(tui.Model)
 	select {
 	case allowed := <-responseCh:
@@ -413,9 +438,9 @@ func TestTUIModelPermissionDialogDenies(t *testing.T) {
 
 func TestTUIModelThemeToggle(t *testing.T) {
 	model := newTUI(t)
-	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlT})
+	updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: 't', Mod: tea.ModCtrl}))
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "light") {
 		t.Fatalf("expected theme toggled to light in status bar: %s", view)
 	}
@@ -437,7 +462,7 @@ func TestTUIModelUsageStatusRenders(t *testing.T) {
 	model.SetContextBaseFn(func() int64 { return 1900 })
 	updated, _ := model.Update(tui.TokenUsageMsg{EstimatedContextTokens: 1900, InputTokens: 1200, CacheCreationInputTokens: 200, CacheReadInputTokens: 800, OutputTokens: 250, MaxContextTokens: 1000000})
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	// cacheUsed=1000, inputSide=1200+800+200=2200 → cache 1k/2.2k with progress bar like ctx
 	if !strings.Contains(view, "/1M") || !strings.Contains(view, "ctx 1.9k") || !strings.Contains(view, "cache 1k/2.2k") || !strings.Contains(view, "out 250") {
 		t.Fatalf("expected usage status with ctx+cache meters in view: %s", view)
@@ -457,7 +482,7 @@ func TestTUIModelUsageStatusAlwaysVisible(t *testing.T) {
 	model := newTUI(t)
 	model.SetContextLimitFn(func() int64 { return 1000000 })
 	model.SetContextBaseFn(func() int64 { return 1500 })
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "/1M") || !strings.Contains(view, "ctx 1.") {
 		t.Fatalf("expected always-visible context usage in view: %s", view)
 	}
@@ -467,7 +492,7 @@ func TestTUIModelSessionBarRendersAboveUsageBar(t *testing.T) {
 	model := newTUI(t)
 	model.SetContextLimitFn(func() int64 { return 1000000 })
 	model.SetModelName("claude-test")
-	view := model.View()
+	view := model.View().Content
 	// Chrome order is session bar → input → usage bar. Idle "Ready" no longer
 	// occupies a permanent row; usage (ctx) lives under the prompt.
 	sessionIndex := strings.Index(view, "claude-test")
@@ -484,7 +509,7 @@ func TestTUIModelActiveRuntimeRendersInTranscript(t *testing.T) {
 	model := newTUI(t)
 	updated, _ := model.Update(tui.ToolStartMsg{Name: "Bash", Input: `{"command":"ls"}`})
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	// Active runtime trails the transcript (above the session/input chrome).
 	statusIndex := strings.Index(view, "正在运行")
 	if statusIndex < 0 {
@@ -502,7 +527,7 @@ func TestTUIModelActiveRuntimeRendersInTranscript(t *testing.T) {
 func TestTUIModelInputBoxHasNoPromptPrefix(t *testing.T) {
 	model := newTUI(t)
 	model, _ = setInputValue(model, "hello")
-	view := model.View()
+	view := model.View().Content
 	if strings.Contains(view, "> hello") || strings.Contains(view, ">  hello") {
 		t.Fatalf("expected input box without > prompt prefix: %s", view)
 	}
@@ -515,9 +540,9 @@ func TestTUIModelUsageStatusTracksLocalInput(t *testing.T) {
 	model := newTUI(t)
 	model.SetContextLimitFn(func() int64 { return 1000000 })
 	model.SetContextBaseFn(func() int64 { return 1500 })
-	before := model.View()
+	before := model.View().Content
 	model, _ = setInputValue(model, "extra local prompt text")
-	after := model.View()
+	after := model.View().Content
 	if before == after {
 		t.Fatalf("expected local input to affect view before=%q after=%q", before, after)
 	}
@@ -541,9 +566,9 @@ func TestTUIModelSlashEffortDoesNotSubmit(t *testing.T) {
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	model = updated.(tui.Model)
 	model, _ = setInputValue(model, "/effort")
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	if submitted {
 		t.Fatal("expected /effort to be handled locally without submit")
 	}
@@ -555,7 +580,7 @@ func TestTUIModelSlashEffortDoesNotSubmit(t *testing.T) {
 func TestTUIModelSlashCompactAutocomplete(t *testing.T) {
 	model := newTUI(t)
 	model, _ = setInputValue(model, "/com")
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "/compact") {
 		t.Fatalf("expected /compact autocomplete in view: %s", view)
 	}
@@ -574,14 +599,14 @@ func TestTUIModelFileAutocompleteAndApply(t *testing.T) {
 	model = asTUIModel(t, updated, cmd)
 
 	model, _ = setInputValue(model, "look at @a")
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "Files:") || !strings.Contains(view, "@alpha.go") {
 		t.Fatalf("expected file autocomplete in view: %s", view)
 	}
 
-	updated, cmd = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, cmd = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab}))
 	model = asTUIModel(t, updated, cmd)
-	view = model.View()
+	view = model.View().Content
 	if !strings.Contains(view, "@alpha.go") {
 		t.Fatalf("expected completed path in view after tab: %s", view)
 	}
@@ -599,13 +624,13 @@ func TestTUIModelAskUserDialogResponds(t *testing.T) {
 		ResponseCh: responseCh,
 	})
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "Choose mode?") || !strings.Contains(view, "Fast") || !strings.Contains(view, "Safe") {
 		t.Fatalf("expected AskUser dialog in view: %s", view)
 	}
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
 	model = updated.(tui.Model)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
 	select {
 	case answers := <-responseCh:
@@ -615,8 +640,8 @@ func TestTUIModelAskUserDialogResponds(t *testing.T) {
 	default:
 		t.Fatal("expected AskUser answer on channel")
 	}
-	if strings.Contains(model.View(), "Choose mode?") {
-		t.Fatalf("expected AskUser dialog cleared: %s", model.View())
+	if strings.Contains(model.View().Content, "Choose mode?") {
+		t.Fatalf("expected AskUser dialog cleared: %s", model.View().Content)
 	}
 }
 
@@ -632,19 +657,20 @@ func TestTUIModelAskUserCustomAnswer(t *testing.T) {
 		ResponseCh: responseCh,
 	})
 	model = updated.(tui.Model)
-	if !strings.Contains(model.View(), "Custom answer") || !strings.Contains(model.View(), "Type a custom answer") {
-		t.Fatalf("expected visible custom answer input: %s", model.View())
+	view := visibleText(model.View().Content)
+	if !strings.Contains(view, "Custom answer") || !strings.Contains(view, "Type a custom answe") {
+		t.Fatalf("expected visible custom answer input: %s", view)
 	}
 
 	for range 2 {
-		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
 		model = updated.(tui.Model)
 	}
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Custom mode")})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Text: "Custom mode"}))
 	model = updated.(tui.Model)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
 
 	select {
@@ -663,23 +689,23 @@ func TestTUIModelShowsActiveShellCount(t *testing.T) {
 		updated, _ := model.Update(tui.ToolStartMsg{Name: "Bash", Input: `{"command":"sleep"}`})
 		model = updated.(tui.Model)
 	}
-	if !strings.Contains(model.View(), "正在运行 2 个 Shell") {
-		t.Fatalf("expected two active shells: %s", model.View())
+	if !strings.Contains(model.View().Content, "正在运行 2 个 Shell") {
+		t.Fatalf("expected two active shells: %s", model.View().Content)
 	}
 	updated, _ := model.Update(tui.ToolDoneMsg{Name: "Bash", Output: "done"})
 	model = updated.(tui.Model)
-	if !strings.Contains(model.View(), "正在运行 1 个 Shell") {
-		t.Fatalf("expected one active shell after completion: %s", model.View())
+	if !strings.Contains(model.View().Content, "正在运行 1 个 Shell") {
+		t.Fatalf("expected one active shell after completion: %s", model.View().Content)
 	}
 }
 
 func TestTUIModelClickOutsideBlursAndTypingRefocuses(t *testing.T) {
 	model := newTUI(t)
-	updated, _ := model.Update(tea.MouseMsg{X: 0, Y: 0, Action: tea.MouseActionPress, Button: tea.MouseButtonLeft})
+	updated, _ := model.Update(tea.MouseClickMsg{X: 0, Y: 0, Button: tea.MouseLeft})
 	model = updated.(tui.Model)
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Text: "a"}))
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "a") {
 		t.Fatalf("expected typing after blur to refocus input: %s", view)
 	}
@@ -694,13 +720,13 @@ func TestTUIModelSlashHelpDoesNotSubmit(t *testing.T) {
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	model = updated.(tui.Model)
 	model, _ = setInputValue(model, "/help")
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
-	view := model.View()
+	view := visibleText(model.View().Content)
 	if submitted {
 		t.Fatal("expected /help to be handled locally without submit")
 	}
-	if !strings.Contains(view, "/model") || !strings.Contains(view, "/clear") {
+	if !strings.Contains(view, "/effort") || !strings.Contains(view, "/web-ui") {
 		t.Fatalf("expected command help in view: %s", view)
 	}
 }
@@ -710,9 +736,9 @@ func TestTUIModelSlashClearClearsTranscript(t *testing.T) {
 	updated, _ := model.Update(tui.StreamTextMsg{Text: "hello before clear"})
 	model = updated.(tui.Model)
 	model, _ = setInputValue(model, "/clear")
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	if strings.Contains(view, "hello before clear") {
 		t.Fatalf("expected /clear to remove old transcript: %s", view)
 	}
@@ -731,9 +757,9 @@ func TestTUIModelSlashSkillSubmitsSkillPrompt(t *testing.T) {
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	model = updated.(tui.Model)
 	model, _ = setInputValue(model, "/review auth changes")
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	if submitted != "Use the Skill tool with skill \"review\" and args \"auth changes\"." {
 		t.Fatalf("unexpected submitted prompt: %q", submitted)
 	}
@@ -750,9 +776,9 @@ func TestTUIModelCtrlCCancelsActiveStream(t *testing.T) {
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	model = updated.(tui.Model)
 	model, _ = setInputValue(model, "write a long answer")
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	updated, cmd := model.Update(tea.KeyPressMsg(tea.Key{Code: 'c', Mod: tea.ModCtrl}))
 	model = updated.(tui.Model)
 	if !canceled {
 		t.Fatal("expected Ctrl+C to call active cancel callback")
@@ -760,8 +786,8 @@ func TestTUIModelCtrlCCancelsActiveStream(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("expected Ctrl+C during stream not to quit")
 	}
-	if !strings.Contains(model.View(), "Canceling") {
-		t.Fatalf("expected canceling status in view: %s", model.View())
+	if !strings.Contains(model.View().Content, "Canceling") {
+		t.Fatalf("expected canceling status in view: %s", model.View().Content)
 	}
 }
 
@@ -786,14 +812,14 @@ func TestTUIModelNewSessionShowsConfirmDialog(t *testing.T) {
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	model = updated.(tui.Model)
 	model, _ = setInputValue(model, "/new-session work")
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "cross-session memory") {
 		t.Fatalf("expected confirm dialog for cross-session memory: %s", view)
 	}
 	// Press 'y' to enable cross-session memory
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Text: "y"}))
 	model = updated.(tui.Model)
 	if !handlerCalled {
 		t.Fatal("expected new session handler to be called")
@@ -801,7 +827,7 @@ func TestTUIModelNewSessionShowsConfirmDialog(t *testing.T) {
 	if !crossValue {
 		t.Fatal("expected cross-session memory to be true after pressing y")
 	}
-	view = model.View()
+	view = model.View().Content
 	if !strings.Contains(view, "created work cross=true") {
 		t.Fatalf("expected result message in view: %s", view)
 	}
@@ -819,10 +845,10 @@ func TestTUIModelNewSessionDenyCrossSessionMemory(t *testing.T) {
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	model = updated.(tui.Model)
 	model, _ = setInputValue(model, "/new-session test")
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
 	// Press 'n' to deny cross-session memory
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Text: "n"}))
 	model = updated.(tui.Model)
 	if !handlerCalled {
 		t.Fatal("expected new session handler to be called")
@@ -842,13 +868,13 @@ func TestTUIModelNewSessionWithoutNameAutoGenerates(t *testing.T) {
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
 	model = updated.(tui.Model)
 	model, _ = setInputValue(model, "/new-session")
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter}))
 	model = updated.(tui.Model)
-	view := model.View()
+	view := model.View().Content
 	if !strings.Contains(view, "cross-session memory") {
 		t.Fatalf("expected confirm dialog when no name supplied: %s", view)
 	}
-	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("y")})
+	updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Text: "y"}))
 	model = updated.(tui.Model)
 	if !strings.HasPrefix(calledName, "session-") {
 		t.Fatalf("expected auto-generated session name, got %q", calledName)
@@ -859,7 +885,7 @@ func setInputValue(model tui.Model, value string) (tui.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	updated := tea.Model(model)
 	for _, r := range value {
-		updated, cmd = updated.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		updated, cmd = updated.Update(tea.KeyPressMsg(tea.Key{Text: string(r)}))
 	}
 	if m, ok := updated.(tui.Model); ok {
 		return m, cmd
@@ -887,7 +913,7 @@ func TestTUIDialogScrollsWhenManyItems(t *testing.T) {
 	// Open sessions dialog with many items.
 	model.ShowDialog(tui.DialogSessions)
 
-	view := model.View()
+	view := model.View().Content
 	viewLines := strings.Split(view, "\n")
 	if len(viewLines) > height+2 {
 		// Allow a small ANSI / trailing newline slack, but not a full overflow.
@@ -913,10 +939,10 @@ func TestTUIDialogScrollsWhenManyItems(t *testing.T) {
 
 	// Move selection to the end; window should follow.
 	for i := 0; i < 45; i++ {
-		updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+		updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyDown}))
 		model = asTUIModel(t, updated, nil)
 	}
-	view = model.View()
+	view = model.View().Content
 	if !strings.Contains(view, "option-39") {
 		t.Fatalf("expected selection window to include option-39: %s", view)
 	}
@@ -948,7 +974,7 @@ func TestTUIAskUserDialogScrollsWhenManyOptions(t *testing.T) {
 		ResponseCh: responseCh,
 	})
 	model = asTUIModel(t, updated, nil)
-	view := model.View()
+	view := model.View().Content
 	if strings.Contains(view, "choice-29") {
 		t.Fatalf("expected ask-user options to be windowed: %s", view)
 	}

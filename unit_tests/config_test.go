@@ -974,10 +974,22 @@ func TestPersistencePath(t *testing.T) {
 }
 
 func TestDefaultSessionDirSanitizesWindowsDrivePath(t *testing.T) {
-	got := config.DefaultSessionDir(`C:\work\project-a`)
-	wantSuffix := filepath.Join("C__work_project-a", "sessions")
-	if !strings.HasSuffix(got, wantSuffix) {
-		t.Fatalf("expected session dir suffix %q, got %q", wantSuffix, got)
+	workDir := `C:\work\project-a`
+	wantBase := filepath.Join("projects", "C__work_project-a")
+	paths := []string{
+		config.ProjectStateDir(workDir),
+		config.DefaultSessionDir(workDir),
+		config.DefaultMemoryDir(workDir),
+		config.DefaultTodoPath(workDir),
+		config.DefaultKnowledgeGraphPath(workDir),
+	}
+	for _, got := range paths {
+		if !strings.Contains(got, wantBase) {
+			t.Fatalf("expected project state path containing %q, got %q", wantBase, got)
+		}
+	}
+	if !strings.HasSuffix(config.DefaultSessionDir(workDir), filepath.Join(wantBase, "sessions")) {
+		t.Fatalf("unexpected session directory: %q", config.DefaultSessionDir(workDir))
 	}
 }
 

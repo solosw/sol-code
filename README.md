@@ -6,7 +6,7 @@ A terminal-based coding agent powered by Claude (Anthropic API) that can read, w
 
 - **Interactive TUI** — Rich terminal UI built with [Bubble Tea](https://github.com/charmbracelet/bubbletea), with streaming text, inline diff rendering, syntax highlighting, timestamps, thinking indicators, and permission dialogs.
 - **@ file attachments** — Type `@` to autocomplete and attach files from the working directory. Text files are inlined into the prompt; images are converted to multimodal image blocks for the model.
-- **Persistent sessions** — Reload saved conversation history with its original message timestamps.
+- **Persistent sessions** — Reload saved conversation history with its original message timestamps. Project-scoped runtime state is stored outside the source tree under `~/.solcode/projects/<safe-project-path>/` (sessions, memories, todos, and knowledge graph).
 - **Batch mode** — Run one-shot prompts non-interactively via `-prompt`.
 - **Multi-model support** — Configure multiple LLM providers and models, switch at runtime with `/model` (current provider only) and `/provider`, or add them directly from their dialogs.
 - **Native Anthropic transport** — The Anthropic Messages API uses a handwritten HTTP/JSON/SSE client, including streaming text, thinking, and tool-input deltas; the official SDK remains only for internal message compatibility.

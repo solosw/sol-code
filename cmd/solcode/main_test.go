@@ -53,6 +53,26 @@ func TestChatMessagesFromSessionUsesPersistedMessageTimes(t *testing.T) {
 	}
 }
 
+func TestChatMessagesFromSessionFoldsPersistedPasteForDisplay(t *testing.T) {
+	label := "[Pasted text #1 · 356 lines]"
+	body := strings.Repeat("long pasted line\n", 356)
+	content := label + "\n\n--- Begin " + label + " ---\n" + body + "--- End " + label + " ---"
+	s := session.NewSession("main", "", "")
+	s.Messages = []sdk.MessageParam{sdk.NewUserMessage(sdk.NewTextBlock(content))}
+
+	messages := chatMessagesFromSession(s)
+	if len(messages) != 2 {
+		t.Fatalf("got %d messages, want loaded-session notice plus user message", len(messages))
+	}
+	message := messages[1]
+	if !strings.Contains(message.Content, body) {
+		t.Fatal("expected persisted paste body to remain available as message content")
+	}
+	if strings.TrimSpace(message.DisplayContent) != label {
+		t.Fatalf("display content = %q, want compact paste label %q", message.DisplayContent, label)
+	}
+}
+
 func TestLoadSanitizedSessionRewritesPollutedSummary(t *testing.T) {
 	ctx := context.Background()
 	store := session.NewFileStore(t.TempDir())

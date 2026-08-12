@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/solosw/solcode/internal/workflow"
 )
 
@@ -77,7 +77,7 @@ func (m *Model) ShowWorkflowEditor() {
 	items := m.workflowEditorCallbacks.List()
 	input := textinput.New()
 	input.CharLimit = 4000
-	input.Width = max(20, m.width-12)
+	input.SetWidth(max(20, m.width-12))
 	m.workflowEditor = &WorkflowEditorState{
 		mode:  wfModeBrowse,
 		items: items,
@@ -98,7 +98,7 @@ func (m *Model) closeWorkflowEditor(message string) {
 	m.refreshViewport()
 }
 
-func (m Model) handleWorkflowEditorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) handleWorkflowEditorKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	ed := m.workflowEditor
 	if ed == nil {
 		return m, nil
@@ -315,7 +315,7 @@ func (m *Model) beginWorkflowField(field workflowField) {
 	ed.input.SetValue(workflowFieldValue(ed.draft, ed.taskIndex, field))
 	ed.input.CursorEnd()
 	ed.input.Focus()
-	ed.input.Width = max(20, m.width-12)
+	ed.input.SetWidth(max(20, m.width-12))
 	ed.status = workflowFieldLabel(field)
 }
 

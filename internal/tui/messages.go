@@ -118,7 +118,7 @@ func renderAssistantMessage(b *strings.Builder, msg ChatMessage, t Theme, ts str
 		return
 	}
 	b.WriteString(t.Assistant.Render(AssistantMark) + ts + "\n")
-	markdown := renderMarkdown(content, t, max(20, width-lipgloss.Width(Connector)))
+	markdown := renderMarkdown(content, t, max(1, width-lipgloss.Width(Connector)))
 	// Glamour prepends a blank line; dropping it keeps the ⎿ connector attached
 	// to the first line of real content instead of an empty gutter row.
 	markdown = strings.TrimLeft(markdown, "\n")
@@ -149,9 +149,18 @@ func renderSystemMessage(b *strings.Builder, msg ChatMessage, t Theme, ts string
 // toolTitle renders the Claude Code-style call header: a state-colored dot,
 // the bold tool name, and the primary argument in parentheses.
 func toolTitle(msg ChatMessage, t Theme, width int, dot lipgloss.Style) string {
-	name := lipgloss.NewStyle().Foreground(t.Text).Bold(true).Render(msg.ToolName)
-	title := dot.Render(AssistantMark) + " " + name
-	if summary := toolInputSummary(msg.ToolName, msg.Content, max(20, width-lipgloss.Width(msg.ToolName)-6)); summary != "" {
+	width = max(1, width)
+	prefix := AssistantMark + " "
+	nameText := truncateWidth(msg.ToolName, max(1, width-lipgloss.Width(prefix)))
+	title := dot.Render(AssistantMark) + " " + lipgloss.NewStyle().Foreground(t.Text).Bold(true).Render(nameText)
+
+	// The title must fit the live terminal width after a resize. Account for the
+	// visible prefix, name, and parentheses before rendering a styled summary.
+	summaryWidth := width - lipgloss.Width(prefix) - lipgloss.Width(nameText) - 2
+	if summaryWidth < 4 {
+		return title
+	}
+	if summary := toolInputSummary(msg.ToolName, msg.Content, summaryWidth); summary != "" {
 		title += t.Muted.Render("(" + summary + ")")
 	}
 	return title

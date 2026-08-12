@@ -18,8 +18,8 @@ func renderMarkdown(text string, theme Theme, width int) string {
 	if text == "" {
 		return ""
 	}
-	if width < 20 {
-		width = 80
+	if width < 1 {
+		width = 1
 	}
 	markdownStyle := markdownStyles(theme)
 	renderer, err := glamour.NewTermRenderer(

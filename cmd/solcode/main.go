@@ -8,12 +8,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	sdk "github.com/anthropics/anthropic-sdk-go"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/solosw/solcode/internal/agent"
 	cpanthropic "github.com/solosw/solcode/internal/anthropic"
 	"github.com/solosw/solcode/internal/app"
@@ -719,8 +720,7 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 			return filepath.Join(config.ProjectConfigDir(cfg.WorkDir), "workflows")
 		},
 	})
-	// program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	program = tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseAllMotion())
+	program = tea.NewProgram(model)
 	_, err = program.Run()
 	return err
 }
@@ -1141,6 +1141,40 @@ func handleMCPToggleSelection(cfg *config.Config, application *app.App, serverNa
 	return tui.SelectResult{Message: message}
 }
 
+var restoredFoldedPasteLabel = regexp.MustCompile(`^\[Pasted text #[0-9]+ · [0-9]+ lines\]$`)
+
+// restoredDisplayContent keeps persisted folded paste bodies available to the
+// model while restoring their compact label in the transcript.
+func restoredDisplayContent(content string) string {
+	const beginPrefix = "--- Begin "
+	for searchFrom := 0; ; {
+		start := strings.Index(content[searchFrom:], beginPrefix)
+		if start < 0 {
+			return content
+		}
+		start += searchFrom
+		labelStart := start + len(beginPrefix)
+		labelEndOffset := strings.Index(content[labelStart:], " ---\n")
+		if labelEndOffset < 0 {
+			return content
+		}
+		labelEnd := labelStart + labelEndOffset
+		label := content[labelStart:labelEnd]
+		if !restoredFoldedPasteLabel.MatchString(label) {
+			searchFrom = labelEnd
+			continue
+		}
+		endMarker := "\n--- End " + label + " ---"
+		endStartOffset := strings.Index(content[labelEnd+len(" ---\n"):], endMarker)
+		if endStartOffset < 0 {
+			return content
+		}
+		endStart := labelEnd + len(" ---\n") + endStartOffset
+		content = content[:start] + content[endStart+len(endMarker):]
+		searchFrom = start
+	}
+}
+
 func chatMessagesFromSession(s *session.Session) []tui.ChatMessage {
 	if s == nil {
 		return nil
@@ -1162,7 +1196,7 @@ func chatMessagesFromSession(s *session.Session) []tui.ChatMessage {
 				} else if role == "system" {
 					displayRole = "system"
 				}
-				messages = append(messages, tui.ChatMessage{Role: displayRole, Content: text, TimeStamp: timestamp})
+				messages = append(messages, tui.ChatMessage{Role: displayRole, Content: text, DisplayContent: restoredDisplayContent(text), TimeStamp: timestamp})
 			case block.OfToolUse != nil:
 				input := ""
 				if raw, err := json.Marshal(block.OfToolUse.Input); err == nil {

@@ -14,10 +14,10 @@ func toolInputSummary(toolName, input string, width int) string {
 	var fields map[string]any
 	if err := json.Unmarshal([]byte(input), &fields); err == nil {
 		if summary := commonToolSummary(toolName, fields); summary != "" {
-			return truncate(summary, max(20, width))
+			return truncateWidth(summary, max(1, width))
 		}
 	}
-	return truncate(oneLine(input), max(20, width))
+	return truncateWidth(oneLine(input), max(1, width))
 }
 
 func commonToolSummary(toolName string, fields map[string]any) string {

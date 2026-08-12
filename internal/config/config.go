@@ -78,23 +78,33 @@ func projectSubDir(workDir string) string {
 	return b.String()
 }
 
-func DefaultSessionDir(workDir string) string {
+// ProjectStateDir stores project-scoped runtime data outside the source tree.
+// A project path such as C:\software\projects\demo becomes
+// ~/.solcode/projects/C__software_projects_demo on Windows.
+func ProjectStateDir(workDir string) string {
 	if sub := projectSubDir(workDir); sub != "" {
-		return filepath.Join(UserStateDir(), sub, "sessions")
+		return filepath.Join(UserStateDir(), "projects", sub)
+	}
+	return UserStateDir()
+}
+
+func DefaultSessionDir(workDir string) string {
+	if projectSubDir(workDir) != "" {
+		return filepath.Join(ProjectStateDir(workDir), "sessions")
 	}
 	return filepath.Join(UserStateDir(), "sessions")
 }
 
 func DefaultMemoryDir(workDir string) string {
-	if sub := projectSubDir(workDir); sub != "" {
-		return filepath.Join(UserStateDir(), sub, "memories")
+	if projectSubDir(workDir) != "" {
+		return filepath.Join(ProjectStateDir(workDir), "memories")
 	}
 	return filepath.Join(UserStateDir(), "memories")
 }
 
 func DefaultTodoPath(workDir string) string {
-	if sub := projectSubDir(workDir); sub != "" {
-		return filepath.Join(UserStateDir(), sub, "todos.json")
+	if projectSubDir(workDir) != "" {
+		return filepath.Join(ProjectStateDir(workDir), "todos.json")
 	}
 	return filepath.Join(UserStateDir(), "todos.json")
 }
@@ -102,8 +112,8 @@ func DefaultTodoPath(workDir string) string {
 // DefaultKnowledgeGraphPath returns the SQLite database used for durable,
 // project-scoped file-change knowledge.
 func DefaultKnowledgeGraphPath(workDir string) string {
-	if sub := projectSubDir(workDir); sub != "" {
-		return filepath.Join(UserStateDir(), sub, "knowledge.db")
+	if projectSubDir(workDir) != "" {
+		return filepath.Join(ProjectStateDir(workDir), "knowledge.db")
 	}
 	return filepath.Join(UserStateDir(), "knowledge.db")
 }

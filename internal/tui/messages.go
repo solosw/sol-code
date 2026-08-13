@@ -13,6 +13,8 @@ func renderMessages(messages []ChatMessage, t Theme, showTimestamp bool, width i
 	contentWidth := max(10, width-2)
 	for i := 0; i < len(messages); i++ {
 		msg := messages[i]
+		msg.Content = sanitizeTerminalText(msg.Content)
+		msg.ToolName = sanitizeTerminalText(msg.ToolName)
 		ts := renderTimestamp(msg, t, showTimestamp)
 		switch msg.Role {
 		case "welcome":

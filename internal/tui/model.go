@@ -316,6 +316,10 @@ func New(submit SubmitFunc) Model {
 
 func NewWith(submit SubmitFunc, theme Theme, modelName, cwd string, showTimestamp bool) Model {
 	vp := viewport.New(viewport.WithWidth(78), viewport.WithHeight(20))
+	// Transcript navigation is handled explicitly by Model.Update. The v2
+	// viewport defaults bind ordinary letters such as h/l/j/k/u/d/f/b, which
+	// otherwise also scroll the transcript while the user types or drags a path.
+	vp.KeyMap = viewport.KeyMap{}
 	input := textarea.New()
 	input.Placeholder = "Ask solcode…"
 	input.Prompt = ""
@@ -527,6 +531,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// textarea handles a PasteMsg line-by-line in v2. Insert the complete
 		// payload ourselves so newlines remain part of one paste operation.
 		m.input.InsertString(strings.ReplaceAll(strings.ReplaceAll(msg.Content, "\r\n", "\n"), "\r", "\n"))
+		m.resize()
 		m.prunePastedBlocks()
 		m.updateAutocomplete()
 		return m, nil
@@ -782,6 +787,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	m.resize()
 	m.prunePastedBlocks()
 	cmds = append(cmds, cmd)
 	m.viewport, cmd = m.viewport.Update(msg)
@@ -1742,7 +1748,7 @@ func (m Model) renderInput() string {
 		BorderForeground(borderColor).
 		BorderTop(true).BorderBottom(true).BorderLeft(true).BorderRight(true).
 		Padding(0, 1).
-		Width(max(1, m.width-2))
+		Width(max(1, m.width-4))
 
 	return inputStyle.Render(inputView)
 }
@@ -2422,7 +2428,7 @@ func (m Model) layout() tuiLayout {
 	activityHeight := m.activityPanelHeight()
 	return tuiLayout{
 		viewportHeight: max(1, m.height-inputHeight-statusHeight-dialogHeight-activityHeight),
-		inputWidth:     max(1, m.width-4),
+		inputWidth:     max(1, m.width-6),
 		inputHeight:    2,
 		statusHeight:   statusHeight,
 		dialogHeight:   dialogHeight,

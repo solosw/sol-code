@@ -6,8 +6,69 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/solosw/solcode/internal/tui"
 )
+
+func TestTUIModelLongPathPasteStaysWithinComposerWidth(t *testing.T) {
+	const width = 80
+	model := tui.New(func(string) (tea.Cmd, func()) { return nil, nil })
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: width, Height: 20})
+	model = updated.(tui.Model)
+
+	path := `C:\\software\\projects\\solcode\\internal\\very-long-directory-name\\another-very-long-directory-name\\screen-shot.png`
+	updated, _ = model.Update(tea.PasteMsg{Content: path})
+	model = updated.(tui.Model)
+
+	view := model.View().Content
+	for _, line := range strings.Split(view, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Fatalf("composer line width = %d, exceeds terminal width %d: %q", got, width, line)
+		}
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "╭") || strings.Contains(line, "╰") {
+			if got := lipgloss.Width(line); got != width {
+				t.Fatalf("composer border width = %d, want terminal width %d: %q", got, width, line)
+			}
+		}
+	}
+}
+
+func TestTUIModelLongPathKeyInputStaysWithinComposerWidth(t *testing.T) {
+	const width = 80
+	model := tui.New(func(string) (tea.Cmd, func()) { return nil, nil })
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: width, Height: 20})
+	model = updated.(tui.Model)
+
+	path := `C:\\software\\projects\\solcode\\internal\\very-long-directory-name\\another-very-long-directory-name\\screen-shot.png`
+	for _, r := range path {
+		updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Text: string(r)}))
+		model = updated.(tui.Model)
+	}
+
+	for _, line := range strings.Split(model.View().Content, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Fatalf("key input line width = %d, exceeds terminal width %d: %q", got, width, line)
+		}
+	}
+}
+
+func TestTUIModelLongPathInputDoesNotHorizontallyScrollTranscript(t *testing.T) {
+	model := tui.New(func(string) (tea.Cmd, func()) { return nil, nil })
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 20})
+	model = updated.(tui.Model)
+
+	path := `C:\\software\\projects\\solcode\\internal\\long-file-name.dll`
+	for _, r := range path {
+		updated, _ = model.Update(tea.KeyPressMsg(tea.Key{Text: string(r)}))
+		model = updated.(tui.Model)
+	}
+
+	if !strings.Contains(model.View().Content, path) {
+		t.Fatalf("expected pasted path to remain in input view")
+	}
+}
 
 func TestTUIModelFoldsOnlyLargeExplicitPaste(t *testing.T) {
 	model := tui.New(nil)

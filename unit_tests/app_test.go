@@ -13,7 +13,7 @@ import (
 	"github.com/solosw/solcode/internal/tool"
 )
 
-func TestAppNewRegistersSkillAndMCPTools(t *testing.T) {
+func TestAppRegistersMCPToolsAfterInitialization(t *testing.T) {
 	workDir := t.TempDir()
 	skillsDir := filepath.Join(workDir, "skills")
 	if err := os.MkdirAll(skillsDir, 0o755); err != nil {
@@ -44,6 +44,9 @@ func TestAppNewRegistersSkillAndMCPTools(t *testing.T) {
 
 	if application.Tools.Find("Skill") == nil {
 		t.Fatal("expected Skill tool to be registered")
+	}
+	if err := application.EnsureMCPTools(context.Background()); err != nil {
+		t.Fatalf("EnsureMCPTools() = %v", err)
 	}
 	mcpTool := application.Tools.Find("mcp__filesystem__read-file")
 	if mcpTool == nil {

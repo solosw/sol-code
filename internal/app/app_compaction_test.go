@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +14,43 @@ import (
 	"github.com/solosw/solcode/internal/memory"
 	"github.com/solosw/solcode/internal/session"
 )
+
+func TestRecordCompactEventStoresLogUnderProjectStateDir(t *testing.T) {
+	workDir := filepath.Join(t.TempDir(), "project")
+	path := filepath.Join(config.ProjectStateDir(workDir), "compact.log")
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(path)) })
+
+	application := &App{Config: config.Config{WorkDir: workDir}}
+	application.recordCompactEvent("test", map[string]any{"ok": true})
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read compact log %q: %v", path, err)
+	}
+	if !strings.Contains(string(data), `"kind":"test"`) {
+		t.Fatalf("compact log = %q, want test event", data)
+	}
+
+	legacyPath := filepath.Join(config.UserStateDir(), legacyProjectStateSubdir(workDir), "compact.log")
+	if legacyPath != path {
+		if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+			t.Fatalf("legacy compact log path %q should not be created, stat error = %v", legacyPath, err)
+		}
+	}
+}
+
+func legacyProjectStateSubdir(workDir string) string {
+	var b strings.Builder
+	for _, r := range filepath.ToSlash(workDir) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
+}
 
 func TestShouldCompactUses85PercentTrigger(t *testing.T) {
 	cfg := config.Default()

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,40 @@ import (
 	"github.com/solosw/solcode/internal/config"
 	"github.com/solosw/solcode/internal/session"
 )
+
+func TestApplyWorkDirOverrideUpdatesDefaultStateDirs(t *testing.T) {
+	cfg := config.Default()
+	cfg.WorkDir = filepath.Join(t.TempDir(), "old")
+	if err := cfg.Normalize(); err != nil {
+		t.Fatalf("Normalize() = %v", err)
+	}
+	newWorkDir := filepath.Join(t.TempDir(), "new")
+	applyWorkDirOverride(&cfg, newWorkDir)
+
+	if cfg.Session.Dir != config.DefaultSessionDir(newWorkDir) {
+		t.Fatalf("Session.Dir = %q, want %q", cfg.Session.Dir, config.DefaultSessionDir(newWorkDir))
+	}
+	if cfg.Memory.Dir != config.DefaultMemoryDir(newWorkDir) {
+		t.Fatalf("Memory.Dir = %q, want %q", cfg.Memory.Dir, config.DefaultMemoryDir(newWorkDir))
+	}
+}
+
+func TestApplyWorkDirOverridePreservesCustomStateDirs(t *testing.T) {
+	cfg := config.Default()
+	cfg.WorkDir = filepath.Join(t.TempDir(), "old")
+	customSessionDir := filepath.Join(t.TempDir(), "sessions")
+	customMemoryDir := filepath.Join(t.TempDir(), "memories")
+	cfg.Session.Dir = customSessionDir
+	cfg.Memory.Dir = customMemoryDir
+	applyWorkDirOverride(&cfg, filepath.Join(t.TempDir(), "new"))
+
+	if cfg.Session.Dir != customSessionDir {
+		t.Fatalf("Session.Dir = %q, want custom path %q", cfg.Session.Dir, customSessionDir)
+	}
+	if cfg.Memory.Dir != customMemoryDir {
+		t.Fatalf("Memory.Dir = %q, want custom path %q", cfg.Memory.Dir, customMemoryDir)
+	}
+}
 
 func TestConversationContextWithoutTimeoutHasNoDeadline(t *testing.T) {
 	ctx, cancel := conversationContext(0)

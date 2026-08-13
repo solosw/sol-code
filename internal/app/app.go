@@ -49,6 +49,8 @@ type App struct {
 	summaryWriter    session.SummaryWriter
 	summaryRefresh   sync.Mutex
 	mcpFactory       mcp.ClientFactory
+	mcpLoadMu        sync.Mutex
+	mcpLoaded        bool
 
 	// usageSession binds OnUsage accumulation to the active session so
 	// token totals persist across reloads.
@@ -95,15 +97,6 @@ func buildToolState(cfg config.Config, mcpFactory mcp.ClientFactory) (*tool.Regi
 	mcpRegistry := mcp.NewRegistry(cfg.MCP.Servers)
 	if mcpFactory != nil {
 		mcpRegistry.SetClientFactory(mcpFactory)
-	}
-	if err := mcpRegistry.Load(); err != nil {
-		// MCP servers that fail to connect are already reported as warnings
-		// by LoadContext. Do not block app startup when one or more servers
-		// are unreachable.
-		_ = err
-	}
-	if mcpTools := mcpRegistry.Tools(); len(mcpTools) > 0 {
-		registry.Register(mcpTools...)
 	}
 	return registry, skillRegistry, mcpRegistry, lspManager, nil
 }
@@ -238,6 +231,28 @@ func New(cfg config.Config, opts ...Option) (*App, error) {
 	}
 
 	return application, nil
+}
+
+// EnsureMCPTools starts configured MCP servers once and adds their discovered
+// tools to the execution registry. It is safe to call concurrently from startup
+// prewarming and a user's first prompt.
+func (a *App) EnsureMCPTools(ctx context.Context) error {
+	if a == nil || a.MCPRegistry == nil {
+		return nil
+	}
+	a.mcpLoadMu.Lock()
+	defer a.mcpLoadMu.Unlock()
+	if a.mcpLoaded {
+		return nil
+	}
+	err := a.MCPRegistry.LoadContext(ctx)
+	if tools := a.MCPRegistry.Tools(); len(tools) > 0 && a.Tools != nil {
+		a.Tools.Register(tools...)
+	}
+	// Preserve best-effort startup behavior: an unavailable server does not
+	// prevent the application from accepting prompts.
+	a.mcpLoaded = true
+	return err
 }
 
 // emitUsage accumulates per-turn usage into the active session (when bound)
@@ -466,6 +481,7 @@ func (a *App) RunPrompt(ctx context.Context, prompt, workDir string, maxTurns in
 	if a == nil {
 		return agent.AgentResult{}, fmt.Errorf("app is nil")
 	}
+	_ = a.EnsureMCPTools(ctx)
 	if prompt == "" {
 		return agent.AgentResult{}, fmt.Errorf("prompt is required")
 	}
@@ -490,6 +506,7 @@ func (a *App) RunPromptWithSession(ctx context.Context, sessionID, prompt, workD
 	if a == nil {
 		return agent.AgentResult{}, fmt.Errorf("app is nil")
 	}
+	_ = a.EnsureMCPTools(ctx)
 	if prompt == "" {
 		return agent.AgentResult{}, fmt.Errorf("prompt is required")
 	}
@@ -2559,7 +2576,7 @@ func (a *App) recordCompactEvent(kind string, fields map[string]any) {
 	if a == nil {
 		return
 	}
-	path := filepath.Join(config.UserStateDir(), projectStateSubdir(a.Config.WorkDir), "compact.log")
+	path := filepath.Join(config.ProjectStateDir(a.Config.WorkDir), "compact.log")
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return
 	}
@@ -2580,23 +2597,6 @@ func (a *App) recordCompactEvent(kind string, fields map[string]any) {
 	}
 	defer file.Close()
 	_, _ = file.Write(append(data, '\n'))
-}
-
-func projectStateSubdir(workDir string) string {
-	workDir = strings.TrimSpace(workDir)
-	if workDir == "" {
-		return ""
-	}
-	var b strings.Builder
-	for _, r := range filepath.ToSlash(workDir) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('_')
-		}
-	}
-	return b.String()
 }
 
 func memoryModelName(cfg config.Config) string {

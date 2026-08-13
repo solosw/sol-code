@@ -68,7 +68,7 @@ func main() {
 		os.Exit(1)
 	}
 	if workDir != "" {
-		cfg.WorkDir = workDir
+		applyWorkDirOverride(&cfg, workDir)
 	}
 	if modelOverride != "" {
 		cfg.Model = modelOverride
@@ -100,6 +100,20 @@ func conversationContext(timeout time.Duration) (context.Context, context.Cancel
 		return context.WithCancel(context.Background())
 	}
 	return context.WithTimeout(context.Background(), timeout)
+}
+
+func applyWorkDirOverride(cfg *config.Config, workDir string) {
+	if cfg == nil || workDir == "" {
+		return
+	}
+	previousWorkDir := cfg.WorkDir
+	cfg.WorkDir = workDir
+	if cfg.Session.Dir == config.DefaultSessionDir(previousWorkDir) {
+		cfg.Session.Dir = config.DefaultSessionDir(cfg.WorkDir)
+	}
+	if cfg.Memory.Dir == config.DefaultMemoryDir(previousWorkDir) {
+		cfg.Memory.Dir = config.DefaultMemoryDir(cfg.WorkDir)
+	}
 }
 
 func isSkillEnabled(cfg config.SkillsConfig, name string) bool {
@@ -319,18 +333,14 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 
 	theme := tui.ThemeByName(cfg.TUI.Theme).WithBackground(cfg.TUI.Background)
 	model := tui.NewWith(submit, theme, cfg.Model, cfg.WorkDir, true)
-	model.SetQueueFunc(queuePrompt)
 	if application.Sessions != nil {
 		sessionName := cfg.Session.DefaultSession
 		if sessionName == "" {
 			sessionName = "main"
 		}
-		if s, err := loadSanitizedSession(context.Background(), application, sessionName, cfg); err == nil && s != nil {
-			if len(s.Messages) > 0 {
-				model.ReplaceMessages(chatMessagesFromSession(s))
-			}
-			// Restore persisted session token totals into the status bar.
+		if s, loadErr := loadSanitizedSession(context.Background(), application, sessionName, cfg); loadErr == nil && s != nil {
 			usage := usageFromSession(cfg, application, s)
+			model.ReplaceMessages(chatMessagesFromSession(s))
 			model.ApplyTokenUsage(tui.TokenUsageMsg{
 				EstimatedContextTokens:   usage.EstimatedContextTokens,
 				InputTokens:              usage.InputTokens,
@@ -342,6 +352,7 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 			})
 		}
 	}
+	model.SetQueueFunc(queuePrompt)
 	model.SetModelNameFn(func() string { return cfg.Model })
 	model.SetContextBaseFn(func() int64 {
 		builder := engine.ContextBuilder{
@@ -721,6 +732,11 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 		},
 	})
 	program = tea.NewProgram(model)
+	if application.MCPRegistry != nil {
+		go func() {
+			_ = application.EnsureMCPTools(context.Background())
+		}()
+	}
 	_, err = program.Run()
 	return err
 }

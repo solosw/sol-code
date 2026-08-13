@@ -21,6 +21,8 @@ const scrollbarWidth = 2
 const pasteEnterGuardWindow = 150 * time.Millisecond
 const foldedPasteMinChars = 1000
 const foldedPasteMinLines = 5
+const maxHistoryEntries = 500
+const maxTUIMessages = 800
 
 type SubmitFunc func(prompt string) (tea.Cmd, func())
 
@@ -269,10 +271,16 @@ type Model struct {
 	activeShells   int
 	cancelCurrent  func()
 
-	// Input history
-	history                []string
-	historyIndex           int
-	lastPasteAt            time.Time
+	// Input history (capped at maxHistoryEntries)
+	history      []string
+	historyIndex int
+	lastPasteAt  time.Time
+
+	// render cache: avoids re-rendering the full transcript on every spinner tick
+	renderedContent        string
+	renderedMsgVersion     int
+	renderedCachedVersion  int
+	renderedWidth          int
 	suppressNextPasteEnter bool
 
 	// Select-all mode
@@ -929,6 +937,10 @@ func (m *Model) saveToHistory(prompt string) {
 		return
 	}
 	m.history = append(m.history, prompt)
+	if len(m.history) > maxHistoryEntries {
+		copy(m.history, m.history[len(m.history)-maxHistoryEntries:])
+		m.history = m.history[:maxHistoryEntries]
+	}
 	m.historyIndex = len(m.history)
 }
 
@@ -1583,6 +1595,7 @@ func (m *Model) startToolActivity(msg ToolStartMsg) {
 		Collapsed: true,
 		TimeStamp: time.Now(),
 	})
+	m.trimMessages()
 	m.updateTodosFromToolInput(msg)
 }
 
@@ -1595,6 +1608,17 @@ func (m *Model) finishToolActivity(msg ToolDoneMsg) {
 		Collapsed: defaultToolCollapsed(msg.Name),
 		TimeStamp: time.Now(),
 	})
+	m.trimMessages()
+}
+
+// trimMessages keeps the displayed transcript within maxTUIMessages.
+// It always removes from the front, so the newest content stays visible.
+func (m *Model) trimMessages() {
+	if len(m.messages) > maxTUIMessages {
+		removed := len(m.messages) - maxTUIMessages
+		m.messages = append(m.messages[:0], m.messages[removed:]...)
+		m.invalidateRenderCache()
+	}
 }
 
 func (m *Model) updateTodosFromToolInput(msg ToolStartMsg) {
@@ -2695,9 +2719,15 @@ func (m *Model) appendAssistantDelta(text string) {
 		last = len(m.messages) - 1
 	}
 	m.messages[last].Content += text
+	m.invalidateRenderCache()
+}
+
+func (m *Model) invalidateRenderCache() {
+	m.renderedMsgVersion++
 }
 
 func (m *Model) refreshViewport() {
+	m.invalidateRenderCache()
 	m.viewport.SetContent(m.viewportContent())
 	m.viewport.GotoBottom()
 }
@@ -2708,12 +2738,37 @@ func (m *Model) refreshViewport() {
 func (m *Model) repaintViewport() {
 	atBottom := m.viewport.AtBottom()
 	offset := m.viewport.YOffset()
-	m.viewport.SetContent(m.viewportContent())
+	// On spinner ticks the message list has not changed — reuse the cached
+	// rendered body and only append the updated runtime line. This avoids
+	// re-rendering the entire transcript (potentially MBs) every 120 ms.
+	content := m.viewportContentCached()
+	m.viewport.SetContent(content)
 	if atBottom {
 		m.viewport.GotoBottom()
 		return
 	}
 	m.viewport.SetYOffset(offset)
+}
+
+// viewportContentCached renders messages only when the list version or width
+// has changed; on spinner ticks the cached body is reused.
+func (m *Model) viewportContentCached() string {
+	w := m.viewport.Width()
+	if m.renderedContent == "" || m.renderedMsgVersion != m.renderedCachedVersion || m.renderedWidth != w {
+		body := strings.TrimRight(renderMessages(m.messages, m.theme, m.showTimestamp, w), "\n")
+		m.renderedContent = body
+		m.renderedWidth = w
+		m.renderedCachedVersion = m.renderedMsgVersion
+	}
+	body := m.renderedContent
+	runtime := m.renderRuntimeLine()
+	if runtime == "" {
+		return body
+	}
+	if body == "" {
+		return runtime
+	}
+	return body + "\n\n" + runtime
 }
 
 // viewportContent is the transcript plus the trailing runtime label.

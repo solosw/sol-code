@@ -68,6 +68,7 @@ type Config struct {
 	OnThinkingDelta  func(string)
 	OnToolStart      func(name string, input json.RawMessage)
 	OnToolDone       func(name string, output string, isError bool)
+	OnStatus         func(string)
 	OnUsage          func(Usage)
 	OnAskUser        func(ctx context.Context, params tool.AskUserParams) (map[string]string, error)
 	QueuedPrompts    func() []string
@@ -343,6 +344,11 @@ func (e *Engine) runMessagesLoop(ctx context.Context, runReq RunRequest) RunResu
 					AgentID:    string(cfg.ID),
 					TodoPath:   e.config.TodoPath,
 					FastModel:  e.config.FastModelName,
+					Status: func(status string) {
+						if e.config.OnStatus != nil {
+							e.config.OnStatus(status)
+						}
+					},
 					RecordFileChange: func(changeCtx context.Context, change tool.FileChange) {
 						if e.config.RecordFileChange != nil {
 							e.config.RecordFileChange(changeCtx, &tool.UseContext{

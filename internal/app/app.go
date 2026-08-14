@@ -201,7 +201,7 @@ func New(cfg config.Config, opts ...Option) (*App, error) {
 		onAskUser:        options.onAskUser,
 		queuedPrompts:    options.queuedPrompts,
 	}
-	eng := engine.NewEngine(engineConfig(cfg, client, runtime, registry, permissions, options.onTextDelta, options.onThinkingDelta, options.onToolStart, options.onToolDone, application.emitUsage, options.onAskUser, options.queuedPrompts, recordFileChange, application.compactMessagesMidRun))
+	eng := engine.NewEngine(engineConfig(cfg, client, runtime, registry, permissions, options.onTextDelta, options.onThinkingDelta, options.onToolStart, options.onToolDone, application.emitUsage, options.onStatus, options.onAskUser, options.queuedPrompts, recordFileChange, application.compactMessagesMidRun))
 	coordinator := agent.NewCoordinator(eng)
 	registry.Register(tool.NewTaskTool(coordinator))
 	application.Engine = eng
@@ -364,7 +364,7 @@ func (a *App) SwitchModel(cfg config.Config) error {
 			PromotionConfidence:      cfg.Memory.PromotionConfidence,
 		}}).WithRetrievalBudget(cfg.Memory.RetrievalM2Limit, cfg.Memory.RetrievalM3Limit, cfg.Memory.RetrievalM4Limit, cfg.Memory.RetrievalM5Limit)
 	}
-	a.Engine.UpdateConfig(engineConfig(cfg, client, a.Hooks, a.Tools, a.Permissions, a.onTextDelta, a.onThinkingDelta, a.onToolStart, a.onToolDone, a.emitUsage, a.onAskUser, a.queuedPrompts, newFileChangeRecorder(a.ChangeGraph), a.compactMessagesMidRun))
+	a.Engine.UpdateConfig(engineConfig(cfg, client, a.Hooks, a.Tools, a.Permissions, a.onTextDelta, a.onThinkingDelta, a.onToolStart, a.onToolDone, a.emitUsage, a.onStatus, a.onAskUser, a.queuedPrompts, newFileChangeRecorder(a.ChangeGraph), a.compactMessagesMidRun))
 	return nil
 }
 
@@ -421,7 +421,7 @@ func (a *App) ReloadFeatures(cfg config.Config, mcpFactory mcp.ClientFactory) er
 	} else {
 		a.MemoryManager = nil
 	}
-	a.Engine.UpdateConfig(engineConfig(cfg, a.Client, a.Hooks, a.Tools, a.Permissions, a.onTextDelta, a.onThinkingDelta, a.onToolStart, a.onToolDone, a.emitUsage, a.onAskUser, a.queuedPrompts, newFileChangeRecorder(a.ChangeGraph), a.compactMessagesMidRun))
+	a.Engine.UpdateConfig(engineConfig(cfg, a.Client, a.Hooks, a.Tools, a.Permissions, a.onTextDelta, a.onThinkingDelta, a.onToolStart, a.onToolDone, a.emitUsage, a.onStatus, a.onAskUser, a.queuedPrompts, newFileChangeRecorder(a.ChangeGraph), a.compactMessagesMidRun))
 	return nil
 }
 
@@ -477,6 +477,70 @@ func (a *App) RepairSession(ctx context.Context, sessionID, workDir string) (*se
 	return current, removed, nil
 }
 
+const mainAgentMaxRetries = 5
+
+var mainAgentRetryDelay = 10 * time.Second
+
+func (a *App) runMainAgent(ctx context.Context, run func() agent.AgentResult) agent.AgentResult {
+	var lastResult agent.AgentResult
+	for attempt := 0; attempt <= mainAgentMaxRetries; attempt++ {
+		result := run()
+		if result.Error == "" || ctx.Err() != nil || !retryableMainAgentError(result.Error) {
+			return result
+		}
+		lastResult = result
+		if attempt == mainAgentMaxRetries {
+			break
+		}
+		retry := attempt + 1
+		if a.onStatus != nil {
+			a.onStatus(fmt.Sprintf("retry %d/%d", retry, mainAgentMaxRetries))
+		}
+		if err := waitForMainAgentRetry(ctx, mainAgentRetryDelay); err != nil {
+			return agent.AgentResult{AgentID: result.AgentID, Error: err.Error()}
+		}
+	}
+	return lastResult
+}
+
+func (a *App) runMainAgentWithHistory(ctx context.Context, run func() engine.RunResult) engine.RunResult {
+	var lastResult engine.RunResult
+	for attempt := 0; attempt <= mainAgentMaxRetries; attempt++ {
+		result := run()
+		if result.AgentResult.Error == "" || ctx.Err() != nil || !retryableMainAgentError(result.AgentResult.Error) {
+			return result
+		}
+		lastResult = result
+		if attempt == mainAgentMaxRetries {
+			break
+		}
+		retry := attempt + 1
+		if a.onStatus != nil {
+			a.onStatus(fmt.Sprintf("retry %d/%d", retry, mainAgentMaxRetries))
+		}
+		if err := waitForMainAgentRetry(ctx, mainAgentRetryDelay); err != nil {
+			return engine.RunResult{AgentResult: agent.AgentResult{AgentID: result.AgentResult.AgentID, Error: err.Error()}, Messages: result.Messages}
+		}
+	}
+	return lastResult
+}
+
+func retryableMainAgentError(errText string) bool {
+	errText = strings.TrimSpace(errText)
+	return errText != "" && !strings.Contains(errText, context.Canceled.Error()) && !strings.Contains(errText, context.DeadlineExceeded.Error())
+}
+
+func waitForMainAgentRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 func (a *App) RunPrompt(ctx context.Context, prompt, workDir string, maxTurns int) (agent.AgentResult, error) {
 	if a == nil {
 		return agent.AgentResult{}, fmt.Errorf("app is nil")
@@ -499,7 +563,9 @@ func (a *App) RunPrompt(ctx context.Context, prompt, workDir string, maxTurns in
 		AllowedTools: []string{},
 		MaxTurns:     maxTurns,
 	}
-	return a.Engine.Run(ctx, cfg), nil
+	return a.runMainAgent(ctx, func() agent.AgentResult {
+		return a.Engine.Run(ctx, cfg)
+	}), nil
 }
 
 func (a *App) RunPromptWithSession(ctx context.Context, sessionID, prompt, workDir string, maxTurns int) (agent.AgentResult, error) {
@@ -566,15 +632,17 @@ func (a *App) RunPromptWithSession(ctx context.Context, sessionID, prompt, workD
 	projectKnowledge := a.projectKnowledgeForRequest(ctx, current, prompt)
 	// Bind usage accumulation so OnUsage persists session totals.
 	unbindUsage := a.bindUsageSession(current)
-	result := a.Engine.RunWithHistory(ctx, engine.RunRequest{
-		AgentConfig:      cfg,
-		SessionID:        sessionID,
-		Messages:         current.CopyMessages(),
-		SessionSummary:   sessionSummaryForRequest(current),
-		MemoryContext:    memoryContext,
-		ProjectKnowledge: projectKnowledge,
+	defer unbindUsage()
+	result := a.runMainAgentWithHistory(ctx, func() engine.RunResult {
+		return a.Engine.RunWithHistory(ctx, engine.RunRequest{
+			AgentConfig:      cfg,
+			SessionID:        sessionID,
+			Messages:         current.CopyMessages(),
+			SessionSummary:   sessionSummaryForRequest(current),
+			MemoryContext:    memoryContext,
+			ProjectKnowledge: projectKnowledge,
+		})
 	})
-	unbindUsage()
 	current.Metadata.WorkDir = workDir
 	current.Metadata.Model = a.Config.Model
 	if len(result.Messages) > 0 {
@@ -2606,7 +2674,7 @@ func memoryModelName(cfg config.Config) string {
 	return cfg.Model
 }
 
-func engineConfig(cfg config.Config, client *cpanthropic.Client, runtime *hook.Runtime, registry *tool.Registry, permissions *permission.Service, onTextDelta, onThinkingDelta func(string), onToolStart func(name string, input json.RawMessage), onToolDone func(name string, output string, isError bool), onUsage func(engine.Usage), onAskUser func(ctx context.Context, params tool.AskUserParams) (map[string]string, error), queuedPrompts func() []string, recordFileChange func(ctx context.Context, uctx *tool.UseContext, change tool.FileChange), compactMessages func(ctx context.Context, messages []sdk.MessageParam) ([]sdk.MessageParam, error)) engine.Config {
+func engineConfig(cfg config.Config, client *cpanthropic.Client, runtime *hook.Runtime, registry *tool.Registry, permissions *permission.Service, onTextDelta, onThinkingDelta func(string), onToolStart func(name string, input json.RawMessage), onToolDone func(name string, output string, isError bool), onUsage func(engine.Usage), onStatus func(string), onAskUser func(ctx context.Context, params tool.AskUserParams) (map[string]string, error), queuedPrompts func() []string, recordFileChange func(ctx context.Context, uctx *tool.UseContext, change tool.FileChange), compactMessages func(ctx context.Context, messages []sdk.MessageParam) ([]sdk.MessageParam, error)) engine.Config {
 	skillRegistry := loadSkills(cfg)
 	return engine.Config{
 		Client:           client,
@@ -2632,6 +2700,7 @@ func engineConfig(cfg config.Config, client *cpanthropic.Client, runtime *hook.R
 		OnThinkingDelta:  onThinkingDelta,
 		OnToolStart:      onToolStart,
 		OnToolDone:       onToolDone,
+		OnStatus:         onStatus,
 		OnUsage:          onUsage,
 		OnAskUser:        onAskUser,
 		QueuedPrompts:    queuedPrompts,
@@ -2768,6 +2837,7 @@ func (a *App) RunWorkflow(ctx context.Context, name, args string) (string, error
 		AgentID:   "workflow",
 		WorkDir:   a.Config.WorkDir,
 		FastModel: a.Config.FastModel,
+		Status:    a.onStatus,
 	}, raw)
 	if err != nil {
 		return "", err

@@ -6,6 +6,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"time"
 )
 
 // UseContext carries contextual information for a tool invocation.
@@ -20,6 +21,8 @@ type UseContext struct {
 	AgentID          string
 	TodoPath         string
 	FastModel        string
+	Status           func(string)
+	TaskRetryDelay   time.Duration
 	RecordFileChange func(ctx context.Context, change FileChange)
 	AskUser          func(ctx context.Context, params AskUserParams) (map[string]string, error)
 }

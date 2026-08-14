@@ -142,11 +142,22 @@ func (r failFirstTaskRunner) Run(ctx context.Context, cfg agent.AgentConfig) age
 }
 
 func TestTaskTool_FailureCancelsParallelTasksAndReturnsError(t *testing.T) {
-	runner := failFirstTaskRunner{started: make(chan string, 2)}
+	runner := failFirstTaskRunner{started: make(chan string, 8)}
 	coordinator := agent.NewCoordinator(runner)
 	taskTool := tool.NewTaskTool(coordinator)
+	var statusMu sync.Mutex
+	var statuses []string
 
-	result, err := taskTool.Invoke(context.Background(), &tool.UseContext{AgentID: "main", WorkDir: "/tmp/project"}, json.RawMessage(`{
+	result, err := taskTool.Invoke(context.Background(), &tool.UseContext{
+		AgentID:        "main",
+		WorkDir:        "/tmp/project",
+		TaskRetryDelay: time.Millisecond,
+		Status: func(status string) {
+			statusMu.Lock()
+			statuses = append(statuses, status)
+			statusMu.Unlock()
+		},
+	}, json.RawMessage(`{
 		"tasks":[
 			{"id":"fail","description":"Failing task","prompt":"fail"},
 			{"id":"slow","description":"Slow task","prompt":"wait"}
@@ -158,6 +169,18 @@ func TestTaskTool_FailureCancelsParallelTasksAndReturnsError(t *testing.T) {
 	if !result.IsError || !strings.Contains(result.Text, "task fail failed: sub-agent failure") {
 		t.Fatalf("expected propagated sub-agent failure, got %#v", result)
 	}
+	statusMu.Lock()
+	hasRetryStatus := false
+	for _, status := range statuses {
+		if strings.Contains(status, "retry 1/5") {
+			hasRetryStatus = true
+			break
+		}
+	}
+	statusMu.Unlock()
+	if !hasRetryStatus {
+		t.Fatalf("expected retry 1/5 status, got %v", statuses)
+	}
 
 	seen := map[string]bool{<-runner.started: true, <-runner.started: true}
 	if !seen["Failing task"] || !seen["Slow task"] {
@@ -166,7 +189,7 @@ func TestTaskTool_FailureCancelsParallelTasksAndReturnsError(t *testing.T) {
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		statuses := coordinator.List()
-		if len(statuses) == 2 {
+		if len(statuses) >= 2 {
 			allDone := true
 			for _, status := range statuses {
 				if status.State == agent.AgentRunning {

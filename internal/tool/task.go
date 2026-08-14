@@ -6,11 +6,16 @@ import (
 	"fmt"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/solosw/solcode/internal/agent"
 )
 
 const TaskToolName = "Task"
+
+var taskRetryDelay = 10 * time.Second
+
+const taskMaxRetries = 5
 
 var taskIDCounter uint64
 
@@ -249,6 +254,36 @@ func (t *taskTool) runTaskLevel(ctx context.Context, uctx *UseContext, tasks []T
 }
 
 func (t *taskTool) runOneTask(ctx context.Context, uctx *UseContext, task TaskItem, fastModel string) (taskRunResult, error) {
+	retryDelay := taskRetryDelay
+	if uctx != nil && uctx.TaskRetryDelay > 0 {
+		retryDelay = uctx.TaskRetryDelay
+	}
+
+	var lastErr error
+	for attempt := 0; attempt <= taskMaxRetries; attempt++ {
+		result, err := t.runTaskAttempt(ctx, uctx, task, fastModel)
+		if err == nil {
+			return result, nil
+		}
+		if ctx.Err() != nil {
+			return taskRunResult{}, err
+		}
+		lastErr = err
+		if attempt == taskMaxRetries {
+			break
+		}
+		retry := attempt + 1
+		if uctx != nil && uctx.Status != nil {
+			uctx.Status(fmt.Sprintf("retry %d/%d: %s", retry, taskMaxRetries, task.Description))
+		}
+		if err := waitForTaskRetry(ctx, retryDelay); err != nil {
+			return taskRunResult{}, fmt.Errorf("task %s canceled: %w", task.ID, err)
+		}
+	}
+	return taskRunResult{}, lastErr
+}
+
+func (t *taskTool) runTaskAttempt(ctx context.Context, uctx *UseContext, task TaskItem, fastModel string) (taskRunResult, error) {
 	id := agent.AgentID(fmt.Sprintf("task-%d", atomic.AddUint64(&taskIDCounter, 1)))
 	_, err := t.coordinator.Spawn(ctx, agent.AgentConfig{
 		ID:             id,
@@ -275,6 +310,17 @@ func (t *taskTool) runOneTask(ctx context.Context, uctx *UseContext, task TaskIt
 		return taskRunResult{}, fmt.Errorf("task %s canceled: %w", task.ID, err)
 	}
 	return taskRunResult{ID: task.ID, Description: task.Description, Output: result.Output}, nil
+}
+
+func waitForTaskRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func taskModel(task TaskItem, fastModel string) string {

@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,6 +14,33 @@ import (
 	"github.com/solosw/solcode/internal/config"
 	"github.com/solosw/solcode/internal/session"
 )
+
+func TestPersistsPermissionModeAndEffort(t *testing.T) {
+	persistencePath := filepath.Join(t.TempDir(), "settings.local.json")
+	if err := config.SaveLocalOverrides(persistencePath, map[string]any{
+		"permission_mode": "plan",
+		"permissions":     map[string]any{"mode": "plan"},
+		"effort":          "high",
+	}); err != nil {
+		t.Fatalf("save local overrides: %v", err)
+	}
+
+	data, err := os.ReadFile(persistencePath)
+	if err != nil {
+		t.Fatalf("read local overrides: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode local overrides: %v", err)
+	}
+	if got["permission_mode"] != "plan" || got["effort"] != "high" {
+		t.Fatalf("persisted settings = %#v", got)
+	}
+	permissions, ok := got["permissions"].(map[string]any)
+	if !ok || permissions["mode"] != "plan" {
+		t.Fatalf("persisted permissions = %#v", got["permissions"])
+	}
+}
 
 func TestApplyWorkDirOverrideUpdatesDefaultStateDirs(t *testing.T) {
 	cfg := config.Default()

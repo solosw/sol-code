@@ -1012,9 +1012,12 @@ func (m *Model) cyclePermissionMode() {
 	m.refreshViewport()
 }
 
-func (m *Model) SetModeSwitchFn(modeNames []string, fn func(mode string)) {
+func (m *Model) SetModeSwitchFn(modeNames []string, currentMode string, fn func(mode string)) {
 	m.modeNames = modeNames
-	m.permissionMode = modeNames[0]
+	m.permissionMode = currentMode
+	if m.permissionMode == "" {
+		m.permissionMode = modeNames[0]
+	}
 	m.modeSwitchFn = fn
 }
 

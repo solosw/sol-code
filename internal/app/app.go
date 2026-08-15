@@ -168,6 +168,7 @@ func New(cfg config.Config, opts ...Option) (*App, error) {
 
 	runtime := hook.NewRuntime(cfg.Hooks)
 	permissions := permission.NewServiceWithConfig(cfg.Permissions)
+	permissions.SetMode(cfg.PermissionMode)
 	client := cpanthropic.NewClient(cpanthropic.Options{
 		APIKey:  cfg.APIKey,
 		BaseURL: cfg.BaseURL,

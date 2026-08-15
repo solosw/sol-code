@@ -457,9 +457,17 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 		return handleNewSessionCommand(&cfg, application, name, persistencePath, crossSessionMemory)
 	})
 	modeNames := []string{"auto", "accept_edits", "bypass", "plan"}
-	model.SetModeSwitchFn(modeNames, func(mode string) {
+	model.SetModeSwitchFn(modeNames, string(cfg.PermissionMode), func(mode string) {
 		permissionMode := permission.Mode(mode)
 		application.Permissions.SetMode(permissionMode)
+		cfg.PermissionMode = permissionMode
+		cfg.Permissions.Mode = permissionMode
+		if err := config.SaveLocalOverrides(persistencePath, map[string]any{
+			"permission_mode": permissionMode,
+			"permissions":     map[string]any{"mode": permissionMode},
+		}); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not persist permission mode: %v\n", err)
+		}
 	})
 	model.SetDialogCallbacks(func(kind tui.DialogKind) []tui.DialogItem {
 		switch kind {

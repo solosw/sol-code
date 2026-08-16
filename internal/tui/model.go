@@ -1264,7 +1264,7 @@ func (m *Model) updateAutocomplete() tea.Cmd {
 	// Slash commands: whole input starts with / and has no spaces yet.
 	if strings.HasPrefix(value, "/") && !strings.Contains(value, " ") {
 		prefix := strings.TrimPrefix(value, "/")
-		commands := []string{"help", "clear", "model", "provider", "effort", "sessions", "compact", "fix-session", "new-session", "skills", "mcp", "workflows", "workflow", "workflow-edit", "web-ui"}
+		commands := []string{"help", "clear", "model", "provider", "effort", "sessions", "compact", "fix-session", "new-session", "skills", "mcp", "goal", "workflows", "workflow", "workflow-edit", "web-ui"}
 		if m.workflowNamesFn != nil {
 			commands = append(commands, m.directWorkflowSlashCommands()...)
 		}

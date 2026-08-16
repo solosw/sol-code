@@ -63,6 +63,7 @@ type App struct {
 	onToolDone      func(name string, output string, isError bool)
 	onUsage         func(engine.Usage)
 	onStatus        func(string)
+	onModeChange    func(permission.Mode) error
 	onAskUser       func(ctx context.Context, params tool.AskUserParams) (map[string]string, error)
 	queuedPrompts   func() []string
 }
@@ -77,6 +78,7 @@ type options struct {
 	onToolDone      func(name string, output string, isError bool)
 	onUsage         func(engine.Usage)
 	onStatus        func(string)
+	onModeChange    func(permission.Mode) error
 	onAskUser       func(ctx context.Context, params tool.AskUserParams) (map[string]string, error)
 	queuedPrompts   func() []string
 }
@@ -130,6 +132,12 @@ func WithUsageCallback(onUsage func(engine.Usage)) Option {
 func WithStatusCallback(onStatus func(string)) Option {
 	return func(o *options) {
 		o.onStatus = onStatus
+	}
+}
+
+func WithModeChangeCallback(onModeChange func(permission.Mode) error) Option {
+	return func(o *options) {
+		o.onModeChange = onModeChange
 	}
 }
 
@@ -199,12 +207,14 @@ func New(cfg config.Config, opts ...Option) (*App, error) {
 		onToolDone:       options.onToolDone,
 		onUsage:          options.onUsage,
 		onStatus:         options.onStatus,
+		onModeChange:     options.onModeChange,
 		onAskUser:        options.onAskUser,
 		queuedPrompts:    options.queuedPrompts,
 	}
 	eng := engine.NewEngine(engineConfig(cfg, client, runtime, registry, permissions, options.onTextDelta, options.onThinkingDelta, options.onToolStart, options.onToolDone, application.emitUsage, options.onStatus, options.onAskUser, options.queuedPrompts, recordFileChange, application.compactMessagesMidRun))
 	coordinator := agent.NewCoordinator(eng)
 	registry.Register(tool.NewTaskTool(coordinator))
+	registry.Register(tool.NewModeSwitchTool(application.SwitchMode))
 	application.Engine = eng
 	application.Coordinator = coordinator
 
@@ -339,6 +349,51 @@ func (a *App) Close() error {
 		}
 	}
 	return firstErr
+}
+
+func (a *App) SwitchMode(ctx context.Context, target string) error {
+	if a == nil || a.Permissions == nil {
+		return fmt.Errorf("permission service is not configured")
+	}
+	next := permission.NormalizeMode(permission.Mode(target))
+	if next != permission.ModePlan && next != permission.ModeBypass && next != permission.ModeGoal {
+		return fmt.Errorf("mode must be plan, bypass, or goal")
+	}
+	current := a.Permissions.Mode()
+	if current == next {
+		return nil
+	}
+	if next == permission.ModePlan {
+		if !a.approveModeTransition("enter plan mode") {
+			return fmt.Errorf("user denied transition to plan mode")
+		}
+	} else {
+		if current != permission.ModePlan {
+			return fmt.Errorf("%s mode can only be entered from plan mode", next)
+		}
+		if !a.approveModeTransition("leave plan mode and enter " + string(next) + " mode") {
+			return fmt.Errorf("user denied transition to %s mode", next)
+		}
+	}
+	if a.onModeChange != nil {
+		if err := a.onModeChange(next); err != nil {
+			return fmt.Errorf("persist permission mode: %w", err)
+		}
+	}
+	a.Permissions.SetMode(next)
+	a.Config.PermissionMode = next
+	a.Config.Permissions.Mode = next
+	if a.onStatus != nil {
+		a.onStatus("Permission mode: " + string(next))
+	}
+	return nil
+}
+
+func (a *App) approveModeTransition(description string) bool {
+	if a == nil || a.Permissions == nil {
+		return false
+	}
+	return a.Permissions.RequestApproval(tool.ModeSwitchToolName, description)
 }
 
 func (a *App) SwitchModel(cfg config.Config) error {

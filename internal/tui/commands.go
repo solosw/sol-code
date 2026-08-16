@@ -50,9 +50,9 @@ func slashHelpText() string {
 		"/new-session [name] — create and switch to a new session",
 		"/skills — browse skills and toggle enabled/disabled",
 		"/mcp — browse MCP servers and toggle enabled/disabled",
+		"/goal [description] — work from goal.md until complete",
 		"/workflows — list loaded workflows (explicit Task graphs)",
-		"/workflow <name> [args] — run a workflow by name (switches to bypass mode)",
-		"/[name]-workflow [args] — shortcut for any loaded workflow (e.g. ppt → /ppt-workflow)",
+		"/workflow <name> [args] — run workflow; /[name]-workflow is its shortcut",
 		"/workflow-edit — terminal workflow orchestrator (list/edit tasks)",
 		"/web-ui — open Dify-style web node editor (browser)",
 		"/[skill] [args] — invoke a loaded skill by name",
@@ -148,6 +148,16 @@ func (m *Model) handleSlashCommand(input string) (bool, tea.Cmd) {
 			m.appendCommandResult("/fix-session is not available in this session.")
 		} else {
 			m.status = "Repairing session..."
+			m.spinnerActive = true
+			m.loadingStart = time.Now()
+			m.refreshViewport()
+			return true, tea.Batch(m.slashAsyncHandler(cmd.Name, cmd.Args), m.nextSpinnerTick())
+		}
+	case "goal":
+		if m.slashAsyncHandler == nil {
+			m.appendCommandResult("/goal is not available in this session.")
+		} else {
+			m.status = "Preparing goal..."
 			m.spinnerActive = true
 			m.loadingStart = time.Now()
 			m.refreshViewport()
@@ -310,6 +320,7 @@ var builtinCommands = map[string]bool{
 	"new-session":   true,
 	"skills":        true,
 	"mcp":           true,
+	"goal":          true,
 	"workflows":     true,
 	"workflow":      true,
 	"workflow-edit": true,

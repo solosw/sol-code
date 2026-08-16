@@ -247,6 +247,14 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 		app.WithToolCallbacks(onToolStart, onToolDone),
 		app.WithUsageCallback(onUsage),
 		app.WithStatusCallback(onStatus),
+		app.WithModeChangeCallback(func(mode permission.Mode) error {
+			cfg.PermissionMode = mode
+			cfg.Permissions.Mode = mode
+			return config.SaveLocalOverrides(persistencePath, map[string]any{
+				"permission_mode": mode,
+				"permissions":     map[string]any{"mode": mode},
+			})
+		}),
 		app.WithAskUserCallback(onAskUser),
 		app.WithQueuedPrompts(drainQueuedPrompts),
 	)
@@ -380,6 +388,34 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 	})
 	model.SetSlashCommandAsyncHandler(func(command, args string) tea.Cmd {
 		switch command {
+		case "goal":
+			return func() tea.Msg {
+				ctx, cancel := conversationContext(timeout)
+				defer cancel()
+				currentSessionID := cfg.Session.DefaultSession
+				if currentSessionID == "" {
+					currentSessionID = "main"
+				}
+				result, err := application.RunGoalWithSession(ctx, currentSessionID, strings.TrimSpace(args), cfg.WorkDir, maxTurns)
+				if errors.Is(ctx.Err(), context.Canceled) {
+					return tui.StreamCanceledMsg{Reason: "Canceled"}
+				}
+				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+					return tui.StreamErrorMsg{Err: context.DeadlineExceeded}
+				}
+				if err != nil {
+					return tui.StreamErrorMsg{Err: err}
+				}
+				if result.Error != "" {
+					return tui.StreamErrorMsg{Err: fmt.Errorf("%s", result.Error)}
+				}
+				if application.Sessions != nil && program != nil {
+					if s, loadErr := loadSanitizedSession(context.Background(), application, currentSessionID, cfg); loadErr == nil && s != nil {
+						program.Send(tui.ReplaceMessagesMsg{Messages: chatMessagesFromSession(s)})
+					}
+				}
+				return tui.StreamDoneMsg{}
+			}
 		case "compact":
 			return func() tea.Msg {
 				currentSessionID := cfg.Session.DefaultSession
@@ -684,6 +720,29 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 						return
 					}
 				}(next, generation)
+				return nil
+			},
+			SaveMCPServer: func(server config.MCPServerConfig, scope string) error {
+				next := cfg
+				next.MCP.Servers = append(next.MCP.Servers, server)
+				next.MCPServers = append([]config.MCPServerConfig(nil), next.MCP.Servers...)
+
+				persistenceTarget := config.DefaultRuntimeSettingsPath()
+				if scope == "project" {
+					persistenceTarget = filepath.Join(config.ProjectConfigDir(cfg.WorkDir), "settings.local.json")
+				}
+				if err := config.SaveLocalOverrides(persistenceTarget, map[string]any{
+					"mcp": map[string]any{"servers": next.MCP.Servers},
+				}); err != nil {
+					return fmt.Errorf("persist MCP server: %w", err)
+				}
+				if err := next.Normalize(); err != nil {
+					return fmt.Errorf("normalize MCP settings: %w", err)
+				}
+				if err := application.ReloadFeatures(next, nil); err != nil {
+					return fmt.Errorf("reload MCP settings: %w", err)
+				}
+				cfg = next
 				return nil
 			},
 			Skills: func() []workflowui.SkillInfo {

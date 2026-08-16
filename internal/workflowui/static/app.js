@@ -56,6 +56,14 @@
     newProvFormat: document.getElementById("new-prov-format"),
     newModelProvider: document.getElementById("new-model-provider"),
     newModelId: document.getElementById("new-model-id"),
+    newMcpName: document.getElementById("new-mcp-name"),
+    newMcpScope: document.getElementById("new-mcp-scope"),
+    newMcpTransport: document.getElementById("new-mcp-transport"),
+    newMcpCommand: document.getElementById("new-mcp-command"),
+    newMcpArgs: document.getElementById("new-mcp-args"),
+    newMcpUrl: document.getElementById("new-mcp-url"),
+    newMcpEnv: document.getElementById("new-mcp-env"),
+    newMcpHeaders: document.getElementById("new-mcp-headers"),
   };
 
   function emptyWorkflow() {
@@ -985,6 +993,57 @@
     }
   }
 
+  async function addMCPServerV2() {
+    const transport = el.newMcpTransport.value;
+    const payload = {
+      name: el.newMcpName.value.trim(),
+      scope: el.newMcpScope.value,
+      transport,
+      command: el.newMcpCommand.value.trim(),
+      args: parseDelimitedList(el.newMcpArgs.value),
+      url: el.newMcpUrl.value.trim(),
+      env: parseKeyValueLines(el.newMcpEnv.value, "="),
+      headers: parseKeyValueLines(el.newMcpHeaders.value, ":"),
+    };
+    if (!payload.name) {
+      setSettingsStatus("MCP server name is required.", "err");
+      return;
+    }
+    if (transport === "stdio" && !payload.command) {
+      setSettingsStatus("A command is required for stdio MCP servers.", "err");
+      return;
+    }
+    if ((transport === "http" || transport === "sse") && !payload.url) {
+      setSettingsStatus(`A URL is required for ${transport} MCP servers.`, "err");
+      return;
+    }
+    if (!(await persistDraftBeforeStructureChange())) return;
+    try {
+      await api("/api/mcp-servers", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      [el.newMcpName, el.newMcpCommand, el.newMcpArgs, el.newMcpUrl, el.newMcpEnv, el.newMcpHeaders].forEach((input) => { input.value = ""; });
+      await loadSettingsV2();
+      setSettingsStatus(`MCP server "${payload.name}" added to ${payload.scope} settings.`, "ok");
+    } catch (err) {
+      setSettingsStatus(String(err.message || err), "err");
+    }
+  }
+
+  function parseDelimitedList(value) {
+    return String(value || "").split(/[\n,]/).map((item) => item.trim()).filter(Boolean);
+  }
+
+  function parseKeyValueLines(value, separator) {
+    const entries = String(value || "").split("\n").map((line) => line.trim()).filter(Boolean);
+    const output = {};
+    entries.forEach((line) => {
+      const index = line.indexOf(separator);
+      if (index <= 0) return;
+      const key = line.slice(0, index).trim();
+      if (key) output[key] = line.slice(index + separator.length).trim();
+    });
+    return output;
+  }
+
   function escapeHtml(s) {
     return String(s)
       .replaceAll("&", "&amp;")
@@ -1020,6 +1079,7 @@
     document.getElementById("btn-reload-settings").onclick = loadSettingsV2;
     document.getElementById("btn-add-provider").onclick = addProviderV2;
     document.getElementById("btn-add-model").onclick = addModelV2;
+    document.getElementById("btn-add-mcp").onclick = addMCPServerV2;
 
     el.setProvider.addEventListener("change", () => {
       if (!settings.draft) return;

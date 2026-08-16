@@ -35,6 +35,7 @@ type Config struct {
 	// plus persists it. Skills returns skill descriptors for the UI.
 	Settings      func() config.Config
 	ApplySettings func(next config.Config) error
+	SaveMCPServer func(server config.MCPServerConfig, scope string) error
 	Skills        func() []SkillInfo
 }
 
@@ -102,6 +103,7 @@ func Start(cfg Config) (*Server, string, error) {
 	mux.HandleFunc("/api/providers/", s.handleProviderByName)
 	mux.HandleFunc("/api/models", s.handleModels)
 	mux.HandleFunc("/api/models/", s.handleModelByName)
+	mux.HandleFunc("/api/mcp-servers", s.handleMCPServers)
 	staticRoot, err := fs.Sub(staticFS, "static")
 	if err != nil {
 		_ = ln.Close()
@@ -294,6 +296,119 @@ type providerSummary struct {
 	BaseURL   string   `json:"base_url"`
 	APIFormat string   `json:"api_format"`
 	Models    []string `json:"models"`
+}
+
+type mcpServerRequest struct {
+	Name      string            `json:"name"`
+	Transport string            `json:"transport"`
+	Command   string            `json:"command"`
+	Args      []string          `json:"args"`
+	URL       string            `json:"url"`
+	Headers   map[string]string `json:"headers"`
+	Env       map[string]string `json:"env"`
+	Scope     string            `json:"scope"`
+}
+
+func (s *Server) handleMCPServers(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if s.cfg.Settings == nil || s.cfg.ApplySettings == nil {
+		http.Error(w, "settings not configured", http.StatusNotImplemented)
+		return
+	}
+
+	var req mcpServerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	transport := strings.ToLower(strings.TrimSpace(req.Transport))
+	if name == "" {
+		http.Error(w, "MCP server name required", http.StatusBadRequest)
+		return
+	}
+	if transport == "" {
+		transport = "stdio"
+	}
+	switch transport {
+	case "stdio":
+		if strings.TrimSpace(req.Command) == "" {
+			http.Error(w, "stdio MCP server command required", http.StatusBadRequest)
+			return
+		}
+	case "http", "sse":
+		if strings.TrimSpace(req.URL) == "" {
+			http.Error(w, transport+" MCP server URL required", http.StatusBadRequest)
+			return
+		}
+	default:
+		http.Error(w, "MCP transport must be stdio, http, or sse", http.StatusBadRequest)
+		return
+	}
+	scope := strings.ToLower(strings.TrimSpace(req.Scope))
+	if scope != "global" && scope != "project" {
+		http.Error(w, "MCP scope must be global or project", http.StatusBadRequest)
+		return
+	}
+
+	next := s.cfg.Settings()
+	for _, server := range next.MCP.Servers {
+		if strings.EqualFold(server.Name, name) {
+			http.Error(w, "MCP server already exists: "+name, http.StatusConflict)
+			return
+		}
+	}
+	server := config.MCPServerConfig{
+		Name:      name,
+		Transport: transport,
+		Type:      transport,
+		Command:   strings.TrimSpace(req.Command),
+		Args:      cleanStrings(req.Args),
+		URL:       strings.TrimSpace(req.URL),
+		Headers:   cleanStringMap(req.Headers),
+		Env:       cleanStringMap(req.Env),
+	}
+	if s.cfg.SaveMCPServer != nil {
+		if err := s.cfg.SaveMCPServer(server, scope); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	} else {
+		next.MCP.Servers = append(next.MCP.Servers, server)
+		next.MCPServers = cloneMCPServers(next.MCP.Servers)
+		if err := s.cfg.ApplySettings(next); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	writeJSON(w, map[string]any{"ok": true, "name": name, "scope": scope})
+}
+
+func cleanStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func cleanStringMap(values map[string]string) map[string]string {
+	out := make(map[string]string, len(values))
+	for key, value := range values {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			out[key] = strings.TrimSpace(value)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {

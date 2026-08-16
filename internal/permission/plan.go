@@ -14,6 +14,7 @@ const PlanModePromptMarker = "=== PLAN MODE (READ-ONLY) ==="
 var PlanModeExtraTools = []string{
 	tool.TodoWriteToolName,
 	tool.TaskToolName,
+	tool.ModeSwitchToolName,
 }
 
 // PlanModeInstructions is prepended to each user message while plan mode is active.

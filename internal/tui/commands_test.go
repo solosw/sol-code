@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestSlashHelpIncludesFixSession(t *testing.T) {
@@ -112,6 +114,31 @@ func TestSlashHelpIncludesDirectWorkflowShortcut(t *testing.T) {
 	help := slashHelpText()
 	if !strings.Contains(help, "/[name]-workflow") {
 		t.Fatalf("expected direct workflow shortcut in help, got %q", help)
+	}
+}
+
+func TestShiftTabCyclesPermissionMode(t *testing.T) {
+	m := New(nil)
+	m.permissionMode = "plan"
+	var switched string
+	m.modeSwitchFn = func(mode string) { switched = mode }
+
+	updated, _ := m.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyTab, Mod: tea.ModShift}))
+	got := updated.(Model)
+	if switched != "auto" {
+		t.Fatalf("switched mode = %q, want auto", switched)
+	}
+	if got.permissionMode != "auto" {
+		t.Fatalf("permission mode = %q, want auto", got.permissionMode)
+	}
+}
+
+func TestSlashAutocompleteIncludesGoal(t *testing.T) {
+	m := New(nil)
+	m.input.SetValue("/go")
+	m.updateAutocomplete()
+	if m.autocomplete == nil || !strings.Contains(strings.Join(m.autocomplete.Items, ","), "goal") {
+		t.Fatalf("expected goal in slash autocomplete, got %#v", m.autocomplete)
 	}
 }
 

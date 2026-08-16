@@ -10,6 +10,7 @@ const (
 	ModeAcceptEdits Mode = "accept_edits"
 	ModeBypass      Mode = "bypass"
 	ModePlan        Mode = "plan"
+	ModeGoal        Mode = "goal"
 )
 
 func NormalizeMode(mode Mode) Mode {
@@ -22,6 +23,8 @@ func NormalizeMode(mode Mode) Mode {
 		return ModeBypass
 	case string(ModePlan):
 		return ModePlan
+	case string(ModeGoal):
+		return ModeGoal
 	default:
 		return mode
 	}

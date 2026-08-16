@@ -10,6 +10,51 @@ import (
 	"github.com/solosw/solcode/internal/workflow"
 )
 
+func TestMCPServerCreationPassesSelectedScope(t *testing.T) {
+	stored := config.Config{}
+	var saved config.MCPServerConfig
+	var scope string
+
+	srv, url, err := Start(Config{
+		Addr:     "127.0.0.1:0",
+		List:     func() []workflow.Definition { return nil },
+		Save:     func(workflow.Definition, workflow.SaveScope, *workflow.Layout) (string, error) { return "", nil },
+		Delete:   func(string) error { return nil },
+		Settings: func() config.Config { return stored },
+		ApplySettings: func(next config.Config) error {
+			stored = next
+			return nil
+		},
+		SaveMCPServer: func(server config.MCPServerConfig, selectedScope string) error {
+			saved = server
+			scope = selectedScope
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer srv.Close()
+
+	body, err := json.Marshal(map[string]any{
+		"name": "project-mcp", "scope": "project", "transport": "stdio", "command": "npx", "args": []string{"-y", "example-mcp"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(url+"api/mcp-servers", "application/json", bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+	if scope != "project" || saved.Name != "project-mcp" || saved.Command != "npx" {
+		t.Fatalf("saved = %#v, scope = %q", saved, scope)
+	}
+}
+
 func TestSettingsUpdateCarriesModelMCPAndSkillState(t *testing.T) {
 	maxTurns := 12
 	stored := config.Config{

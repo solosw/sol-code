@@ -223,6 +223,7 @@ func (e *Engine) runMessagesLoop(ctx context.Context, runReq RunRequest) RunResu
 		// executor and ToolSearch, while only core + sticky + live matches
 		// are sent to the model.
 		tools := SelectToolsForTurn(allTools, cfg.AllowedTools, selectionQuery(prompt, ""), enabledTools)
+		builder.PlanMode = e.config.Permissions != nil && e.config.Permissions.Mode() == permission.ModePlan
 		req := builder.Build(BuildRequest{
 			Model:            modelName,
 			ProjectKnowledge: runReq.ProjectKnowledge,

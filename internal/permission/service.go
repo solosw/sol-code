@@ -64,6 +64,18 @@ func (s *Service) SetAskFunc(fn AskFunc) {
 	s.askFn = fn
 }
 
+// RequestApproval asks the configured interactive approver without applying a
+// tool permission policy. It is used for explicit runtime-mode transitions.
+func (s *Service) RequestApproval(toolName, description string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.RLock()
+	askFn := s.askFn
+	s.mu.RUnlock()
+	return askFn != nil && askFn(toolName, description)
+}
+
 func (s *Service) SetMode(mode Mode) {
 	if s == nil {
 		return
@@ -115,7 +127,7 @@ func (s *Service) Check(t tool.Tool, input json.RawMessage) Decision {
 	}
 
 	switch mode {
-	case ModeBypass:
+	case ModeBypass, ModeGoal:
 		return Decision{Allowed: true}
 	case ModePlan:
 		if t.IsReadOnly(input) {

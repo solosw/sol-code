@@ -22,6 +22,7 @@ var coreToolNames = map[string]bool{
 	tool.GlobToolName:        true,
 	tool.GrepToolName:        true,
 	tool.LSToolName:          true,
+	tool.ModeSwitchToolName:  true,
 	"LSP":                    true,
 	tool.TaskToolName:        true,
 	tool.TodoWriteToolName:   true,

@@ -188,6 +188,31 @@
           <section class="settings-section">
             <div class="section-heading"><h2>MCP Servers</h2></div>
             <div id="mcp-list" class="settings-list"></div>
+            <details class="settings-add">
+              <summary>Add MCP server</summary>
+              <div class="settings-grid">
+                <label>Name <input id="new-mcp-name" type="text" placeholder="my-mcp" /></label>
+                <label>Scope
+                  <select id="new-mcp-scope">
+                    <option value="global">Global</option>
+                    <option value="project">Project</option>
+                  </select>
+                </label>
+                <label>Transport
+                  <select id="new-mcp-transport">
+                    <option value="stdio">stdio</option>
+                    <option value="http">http</option>
+                    <option value="sse">sse</option>
+                  </select>
+                </label>
+                <label class="span-2">Command <input id="new-mcp-command" type="text" placeholder="npx" /></label>
+                <label class="span-2">Arguments <input id="new-mcp-args" type="text" placeholder="-y, @modelcontextprotocol/server-filesystem" /></label>
+                <label class="span-2">URL <input id="new-mcp-url" type="url" placeholder="https://example.com/mcp" /></label>
+                <label class="span-2">Environment (one KEY=VALUE per line) <textarea id="new-mcp-env" rows="3" placeholder="API_KEY=..."></textarea></label>
+                <label class="span-2">Headers (one Name: Value per line) <textarea id="new-mcp-headers" rows="3" placeholder="Authorization: Bearer ..."></textarea></label>
+              </div>
+              <button id="btn-add-mcp" class="btn primary">Add MCP server</button>
+            </details>
           </section>
 
           <section class="settings-section">

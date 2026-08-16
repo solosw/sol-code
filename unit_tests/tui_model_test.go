@@ -726,7 +726,7 @@ func TestTUIModelSlashHelpDoesNotSubmit(t *testing.T) {
 	if submitted {
 		t.Fatal("expected /help to be handled locally without submit")
 	}
-	if !strings.Contains(view, "/effort") || !strings.Contains(view, "/web-ui") {
+	if !strings.Contains(view, "/effort") || !strings.Contains(view, "/web-ui") || !strings.Contains(view, "/goal") {
 		t.Fatalf("expected command help in view: %s", view)
 	}
 }

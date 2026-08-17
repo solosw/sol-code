@@ -15,6 +15,33 @@ import (
 	"github.com/solosw/solcode/internal/session"
 )
 
+func TestNewAppWithSessionFallbackCreatesFreshSession(t *testing.T) {
+	cfg := config.Default()
+	cfg.APIKey = "test"
+	cfg.Session.Enabled = true
+	cfg.Session.Persist = true
+	cfg.Session.Dir = t.TempDir()
+	cfg.Session.DefaultSession = "main"
+
+	first, _, err := newAppWithSessionFallback(cfg)
+	if err != nil {
+		t.Fatalf("first app: %v", err)
+	}
+	defer first.Close()
+
+	second, secondCfg, err := newAppWithSessionFallback(cfg)
+	if err != nil {
+		t.Fatalf("fallback app: %v", err)
+	}
+	defer second.Close()
+	if secondCfg.Session.DefaultSession == "main" {
+		t.Fatalf("fallback session = %q, want a new session", secondCfg.Session.DefaultSession)
+	}
+	if !strings.HasPrefix(secondCfg.Session.DefaultSession, "session-") {
+		t.Fatalf("fallback session = %q, want session-*", secondCfg.Session.DefaultSession)
+	}
+}
+
 func TestPersistsPermissionModeAndEffort(t *testing.T) {
 	persistencePath := filepath.Join(t.TempDir(), "settings.local.json")
 	if err := config.SaveLocalOverrides(persistencePath, map[string]any{

@@ -214,7 +214,7 @@ func New(cfg config.Config, opts ...Option) (*App, error) {
 	eng := engine.NewEngine(engineConfig(cfg, client, runtime, registry, permissions, options.onTextDelta, options.onThinkingDelta, options.onToolStart, options.onToolDone, application.emitUsage, options.onStatus, options.onAskUser, options.queuedPrompts, recordFileChange, application.compactMessagesMidRun))
 	coordinator := agent.NewCoordinator(eng)
 	registry.Register(tool.NewTaskTool(coordinator))
-	registry.Register(tool.NewModeSwitchTool(application.SwitchMode))
+	registry.Register(tool.NewModeSwitchToolWithGoal(application.SwitchMode, application.startGoalFlow))
 	application.Engine = eng
 	application.Coordinator = coordinator
 
@@ -247,6 +247,17 @@ func New(cfg config.Config, opts ...Option) (*App, error) {
 // EnsureMCPTools starts configured MCP servers once and adds their discovered
 // tools to the execution registry. It is safe to call concurrently from startup
 // prewarming and a user's first prompt.
+func (a *App) startGoalFlow(ctx context.Context, uctx *tool.UseContext) error {
+	if a == nil {
+		return fmt.Errorf("app is nil")
+	}
+	if uctx == nil {
+		return fmt.Errorf("goal flow context is missing")
+	}
+	_, err := a.RunGoalWithSession(ctx, uctx.SessionID, "", uctx.WorkDir, a.Config.MaxTurns)
+	return err
+}
+
 func (a *App) EnsureMCPTools(ctx context.Context) error {
 	if a == nil || a.MCPRegistry == nil {
 		return nil
@@ -333,13 +344,21 @@ func openChangeGraph(cfg config.Config) (*changegraph.Store, error) {
 }
 
 func (a *App) Close() error {
+	if a == nil {
+		return nil
+	}
+	var firstErr error
+	if a.Sessions != nil {
+		if err := a.Sessions.ReleaseAll(); err != nil {
+			firstErr = err
+		}
+	}
 	if a.lspManager != nil {
 		_ = a.lspManager.Close()
 	}
 	if a == nil {
 		return nil
 	}
-	var firstErr error
 	if a.MCPRegistry != nil {
 		firstErr = a.MCPRegistry.Close()
 	}

@@ -14,6 +14,34 @@ type FileStore struct {
 	dir string
 }
 
+type sessionLock struct {
+	path string
+}
+
+func (l *sessionLock) Release() error {
+	if l == nil || l.path == "" {
+		return nil
+	}
+	return os.Remove(l.path)
+}
+
+func (s *FileStore) Acquire(ctx context.Context, id SessionID) (func() error, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+		return nil, fmt.Errorf("create sessions dir: %w", err)
+	}
+	path := s.pathFor(id) + ".lock"
+	if err := os.Mkdir(path, 0o755); err != nil {
+		if os.IsExist(err) {
+			return nil, fmt.Errorf("session %q is already open in another solcode window", id)
+		}
+		return nil, fmt.Errorf("lock session %q: %w", id, err)
+	}
+	return (&sessionLock{path: path}).Release, nil
+}
+
 func NewFileStore(dir string) *FileStore {
 	return &FileStore{dir: dir}
 }

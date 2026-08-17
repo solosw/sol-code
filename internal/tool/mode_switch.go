@@ -16,16 +16,23 @@ type ModeSwitchRequest struct {
 type modeSwitchTool struct {
 	BaseTool
 	switchMode func(ctx context.Context, mode string) error
+	startGoal  func(ctx context.Context, uctx *UseContext) error
 }
 
 func NewModeSwitchTool(switchMode func(ctx context.Context, mode string) error) Tool {
 	return &modeSwitchTool{switchMode: switchMode}
 }
 
+// NewModeSwitchToolWithGoal configures ModeSwitch(goal) to start the goal flow
+// after the permission-mode transition succeeds.
+func NewModeSwitchToolWithGoal(switchMode func(ctx context.Context, mode string) error, startGoal func(context.Context, *UseContext) error) Tool {
+	return &modeSwitchTool{switchMode: switchMode, startGoal: startGoal}
+}
+
 func (t *modeSwitchTool) Name() string { return ModeSwitchToolName }
 
 func (t *modeSwitchTool) Description() string {
-	return "Request a permission-mode transition. Entering plan from another mode requires user approval. Bypass and goal are only available from plan and also require user approval."
+	return "Request a permission-mode transition. Entering plan from another mode requires user approval. Bypass and goal are only available from plan and also require user approval. Switching to goal starts the goal.md workflow after approval."
 }
 
 func (t *modeSwitchTool) InputSchema() map[string]any {
@@ -44,7 +51,7 @@ func (t *modeSwitchTool) InputSchema() map[string]any {
 
 func (t *modeSwitchTool) IsDestructive(json.RawMessage) bool { return false }
 
-func (t *modeSwitchTool) Invoke(ctx context.Context, _ *UseContext, input json.RawMessage) (*ContentBlock, error) {
+func (t *modeSwitchTool) Invoke(ctx context.Context, uctx *UseContext, input json.RawMessage) (*ContentBlock, error) {
 	var req ModeSwitchRequest
 	if err := json.Unmarshal(input, &req); err != nil {
 		return ErrorResult("invalid mode switch request: " + err.Error()), nil
@@ -58,6 +65,12 @@ func (t *modeSwitchTool) Invoke(ctx context.Context, _ *UseContext, input json.R
 	}
 	if err := t.switchMode(ctx, mode); err != nil {
 		return ErrorResult(err.Error()), nil
+	}
+	if mode == "goal" && t.startGoal != nil {
+		if err := t.startGoal(ctx, uctx); err != nil {
+			return ErrorResult(err.Error()), nil
+		}
+		return Result("Permission mode switched to goal; goal.md workflow started."), nil
 	}
 	return Result("Permission mode switched to " + mode + "."), nil
 }

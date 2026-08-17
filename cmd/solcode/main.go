@@ -134,8 +134,42 @@ func isSkillEnabled(cfg config.SkillsConfig, name string) bool {
 	return false
 }
 
+func newAppWithSessionFallback(cfg config.Config, opts ...app.Option) (*app.App, config.Config, error) {
+	application, err := app.New(cfg, opts...)
+	if err == nil && application.Sessions != nil {
+		_, err = loadSanitizedSession(context.Background(), application, cfg.Session.DefaultSession, cfg)
+		if err == nil {
+			err = application.Sessions.Acquire(context.Background(), application.Sessions.DefaultID())
+		}
+	}
+	if err == nil {
+		return application, cfg, nil
+	}
+	if application != nil {
+		_ = application.Close()
+	}
+	if !cfg.Session.Enabled || !cfg.Session.Persist || !strings.Contains(err.Error(), "already open") {
+		return nil, cfg, err
+	}
+	cfg.Session.DefaultSession = "session-" + time.Now().Format("20060102-150405.000000000")
+	application, retryErr := app.New(cfg, opts...)
+	if retryErr == nil && application.Sessions != nil {
+		_, retryErr = loadSanitizedSession(context.Background(), application, cfg.Session.DefaultSession, cfg)
+		if retryErr == nil {
+			retryErr = application.Sessions.Acquire(context.Background(), application.Sessions.DefaultID())
+		}
+	}
+	if retryErr != nil {
+		if application != nil {
+			_ = application.Close()
+		}
+		return nil, cfg, fmt.Errorf("create fallback session %q: %w", cfg.Session.DefaultSession, retryErr)
+	}
+	return application, cfg, nil
+}
+
 func runBatch(cfg config.Config, prompt string, timeout time.Duration, maxTurns int) error {
-	application, err := app.New(cfg)
+	application, cfg, err := newAppWithSessionFallback(cfg)
 	if err != nil {
 		return fmt.Errorf("create app: %w", err)
 	}
@@ -242,7 +276,7 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 		}
 	}
 
-	application, err := app.New(cfg,
+	application, cfg, err := newAppWithSessionFallback(cfg,
 		app.WithStreamCallbacks(onTextDelta, onThinkingDelta),
 		app.WithToolCallbacks(onToolStart, onToolDone),
 		app.WithUsageCallback(onUsage),
@@ -1399,6 +1433,9 @@ func handleNewSessionCommand(cfg *config.Config, application *app.App, args, per
 	if err != nil {
 		return tui.SelectResult{Message: fmt.Sprintf("Could not create session %q: %v", name, err)}
 	}
+	if err := application.Sessions.Acquire(context.Background(), sessionID(name)); err != nil {
+		return tui.SelectResult{Message: fmt.Sprintf("Could not open session %q: %v", name, err)}
+	}
 	if s == nil {
 		s = session.NewSession(sessionID(name), cfg.WorkDir, cfg.Model)
 	}
@@ -1406,7 +1443,15 @@ func handleNewSessionCommand(cfg *config.Config, application *app.App, args, per
 	s.Metadata.CrossSessionMemory = &crossSessionMemory
 	s.Metadata.MemoryBootstrapPending = crossSessionMemory
 	if err := application.Sessions.Save(context.Background(), s); err != nil {
+		_ = application.Sessions.Release(sessionID(name))
 		return tui.SelectResult{Message: fmt.Sprintf("Could not save session %q: %v", name, err)}
+	}
+	oldSession := cfg.Session.DefaultSession
+	if oldSession == "" {
+		oldSession = "main"
+	}
+	if oldSession != name {
+		_ = application.Sessions.Release(sessionID(oldSession))
 	}
 	cfg.Session.DefaultSession = name
 	application.Config.Session.DefaultSession = name

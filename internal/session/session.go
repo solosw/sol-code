@@ -101,16 +101,22 @@ type Store interface {
 	Delete(ctx context.Context, id SessionID) error
 }
 
+type Locker interface {
+	Acquire(ctx context.Context, id SessionID) (func() error, error)
+}
+
 type Manager struct {
 	store     Store
 	defaultID SessionID
+	locks     map[SessionID]func() error
+	mu        sync.Mutex
 }
 
 func NewManager(store Store, defaultID SessionID) *Manager {
 	if defaultID == "" {
 		defaultID = "main"
 	}
-	return &Manager{store: store, defaultID: defaultID}
+	return &Manager{store: store, defaultID: defaultID, locks: make(map[SessionID]func() error)}
 }
 
 func (m *Manager) DefaultID() SessionID {
@@ -118,6 +124,59 @@ func (m *Manager) DefaultID() SessionID {
 		return "main"
 	}
 	return m.defaultID
+}
+func (m *Manager) Acquire(ctx context.Context, id SessionID) error {
+	if m == nil || m.store == nil {
+		return nil
+	}
+	locker, ok := m.store.(Locker)
+	if !ok {
+		return nil
+	}
+	id = nonEmptyID(id, m.DefaultID())
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, exists := m.locks[id]; exists {
+		return fmt.Errorf("session %q is already open", id)
+	}
+	release, err := locker.Acquire(ctx, id)
+	if err != nil {
+		return err
+	}
+	m.locks[id] = release
+	return nil
+}
+
+func (m *Manager) Release(id SessionID) error {
+	if m == nil {
+		return nil
+	}
+	id = nonEmptyID(id, m.DefaultID())
+	m.mu.Lock()
+	release := m.locks[id]
+	delete(m.locks, id)
+	m.mu.Unlock()
+	if release == nil {
+		return nil
+	}
+	return release()
+}
+
+func (m *Manager) ReleaseAll() error {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	locks := m.locks
+	m.locks = make(map[SessionID]func() error)
+	m.mu.Unlock()
+	var firstErr error
+	for _, release := range locks {
+		if err := release(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (m *Manager) LoadOrCreate(ctx context.Context, id SessionID, workDir, model string) (*Session, error) {

@@ -137,10 +137,7 @@ func isSkillEnabled(cfg config.SkillsConfig, name string) bool {
 func newAppWithSessionFallback(cfg config.Config, opts ...app.Option) (*app.App, config.Config, error) {
 	application, err := app.New(cfg, opts...)
 	if err == nil && application.Sessions != nil {
-		_, err = loadSanitizedSession(context.Background(), application, cfg.Session.DefaultSession, cfg)
-		if err == nil {
-			err = application.Sessions.Acquire(context.Background(), application.Sessions.DefaultID())
-		}
+		_, _, err = application.Sessions.LoadOrCreateAndAcquire(context.Background(), sessionID(cfg.Session.DefaultSession), cfg.WorkDir, cfg.Model)
 	}
 	if err == nil {
 		return application, cfg, nil
@@ -154,10 +151,7 @@ func newAppWithSessionFallback(cfg config.Config, opts ...app.Option) (*app.App,
 	cfg.Session.DefaultSession = "session-" + time.Now().Format("20060102-150405.000000000")
 	application, retryErr := app.New(cfg, opts...)
 	if retryErr == nil && application.Sessions != nil {
-		_, retryErr = loadSanitizedSession(context.Background(), application, cfg.Session.DefaultSession, cfg)
-		if retryErr == nil {
-			retryErr = application.Sessions.Acquire(context.Background(), application.Sessions.DefaultID())
-		}
+		_, _, retryErr = application.Sessions.LoadOrCreateAndAcquire(context.Background(), sessionID(cfg.Session.DefaultSession), cfg.WorkDir, cfg.Model)
 	}
 	if retryErr != nil {
 		if application != nil {
@@ -1429,12 +1423,15 @@ func handleNewSessionCommand(cfg *config.Config, application *app.App, args, per
 	if name == "" {
 		return tui.SelectResult{Message: "Session name is required."}
 	}
-	s, err := loadSanitizedSession(context.Background(), application, name, *cfg)
+	s, _, err := application.Sessions.LoadOrCreateAndAcquireIgnoringExisting(context.Background(), sessionID(name), cfg.WorkDir, cfg.Model)
 	if err != nil {
-		return tui.SelectResult{Message: fmt.Sprintf("Could not create session %q: %v", name, err)}
-	}
-	if err := application.Sessions.Acquire(context.Background(), sessionID(name)); err != nil {
 		return tui.SelectResult{Message: fmt.Sprintf("Could not open session %q: %v", name, err)}
+	}
+	if application.SanitizeLoadedSession(s) {
+		if err := application.Sessions.Save(context.Background(), s); err != nil {
+			_ = application.Sessions.Release(sessionID(name))
+			return tui.SelectResult{Message: fmt.Sprintf("Could not load session %q: %v", name, err)}
+		}
 	}
 	if s == nil {
 		s = session.NewSession(sessionID(name), cfg.WorkDir, cfg.Model)

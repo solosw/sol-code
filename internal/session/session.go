@@ -105,6 +105,10 @@ type Locker interface {
 	Acquire(ctx context.Context, id SessionID) (func() error, error)
 }
 
+type IgnoringLocker interface {
+	AcquireIgnoringExisting(ctx context.Context, id SessionID) (func() error, error)
+}
+
 type Manager struct {
 	store     Store
 	defaultID SessionID
@@ -177,6 +181,53 @@ func (m *Manager) ReleaseAll() error {
 		}
 	}
 	return firstErr
+}
+
+func (m *Manager) LoadOrCreateAndAcquireIgnoringExisting(ctx context.Context, id SessionID, workDir, model string) (*Session, bool, error) {
+	if m == nil || m.store == nil {
+		return NewSession(nonEmptyID(id, "main"), workDir, model), true, nil
+	}
+	id = nonEmptyID(id, m.DefaultID())
+	locker, ok := m.store.(IgnoringLocker)
+	if !ok {
+		return m.LoadOrCreateAndAcquire(ctx, id, workDir, model)
+	}
+	m.mu.Lock()
+	_, alreadyOwned := m.locks[id]
+	m.mu.Unlock()
+	if !alreadyOwned {
+		release, err := locker.AcquireIgnoringExisting(ctx, id)
+		if err != nil {
+			return nil, false, err
+		}
+		m.mu.Lock()
+		m.locks[id] = release
+		m.mu.Unlock()
+	}
+	s, created, err := m.LoadOrCreateWithStatus(ctx, id, workDir, model)
+	if err != nil {
+		if !alreadyOwned {
+			_ = m.Release(id)
+		}
+		return nil, false, err
+	}
+	return s, created, nil
+}
+
+func (m *Manager) LoadOrCreateAndAcquire(ctx context.Context, id SessionID, workDir, model string) (*Session, bool, error) {
+	if m == nil || m.store == nil {
+		return NewSession(nonEmptyID(id, "main"), workDir, model), true, nil
+	}
+	id = nonEmptyID(id, m.DefaultID())
+	if err := m.Acquire(ctx, id); err != nil {
+		return nil, false, err
+	}
+	s, created, err := m.LoadOrCreateWithStatus(ctx, id, workDir, model)
+	if err != nil {
+		_ = m.Release(id)
+		return nil, false, err
+	}
+	return s, created, nil
 }
 
 func (m *Manager) LoadOrCreate(ctx context.Context, id SessionID, workDir, model string) (*Session, error) {

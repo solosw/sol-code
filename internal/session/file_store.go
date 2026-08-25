@@ -15,17 +15,33 @@ type FileStore struct {
 }
 
 type sessionLock struct {
-	path string
+	path  string
+	owner string
 }
 
 func (l *sessionLock) Release() error {
-	if l == nil || l.path == "" {
+	if l == nil || l.path == "" || l.owner == "" {
 		return nil
 	}
-	return os.Remove(l.path)
+	if err := os.Remove(l.owner); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.Remove(l.path); err != nil && !os.IsNotExist(err) {
+		// Other terminals may still own this session.
+		return nil
+	}
+	return nil
 }
 
 func (s *FileStore) Acquire(ctx context.Context, id SessionID) (func() error, error) {
+	return s.acquire(ctx, id, false)
+}
+
+func (s *FileStore) AcquireIgnoringExisting(ctx context.Context, id SessionID) (func() error, error) {
+	return s.acquire(ctx, id, true)
+}
+
+func (s *FileStore) acquire(ctx context.Context, id SessionID, ignoreExisting bool) (func() error, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -33,13 +49,32 @@ func (s *FileStore) Acquire(ctx context.Context, id SessionID) (func() error, er
 		return nil, fmt.Errorf("create sessions dir: %w", err)
 	}
 	path := s.pathFor(id) + ".lock"
-	if err := os.Mkdir(path, 0o755); err != nil {
+	if ignoreExisting {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			return nil, fmt.Errorf("lock session %q: %w", id, err)
+		}
+	} else if err := os.Mkdir(path, 0o755); err != nil {
 		if os.IsExist(err) {
 			return nil, fmt.Errorf("session %q is already open in another solcode window", id)
 		}
 		return nil, fmt.Errorf("lock session %q: %w", id, err)
 	}
-	return (&sessionLock{path: path}).Release, nil
+	owner, err := os.CreateTemp(path, "owner-")
+	if err != nil {
+		if !ignoreExisting {
+			_ = os.Remove(path)
+		}
+		return nil, fmt.Errorf("record session %q owner: %w", id, err)
+	}
+	ownerPath := owner.Name()
+	if err := owner.Close(); err != nil {
+		_ = os.Remove(ownerPath)
+		if !ignoreExisting {
+			_ = os.Remove(path)
+		}
+		return nil, fmt.Errorf("record session %q owner: %w", id, err)
+	}
+	return (&sessionLock{path: path, owner: ownerPath}).Release, nil
 }
 
 func NewFileStore(dir string) *FileStore {

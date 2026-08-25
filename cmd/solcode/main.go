@@ -15,6 +15,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	sdk "github.com/anthropics/anthropic-sdk-go"
+	"github.com/solosw/solcode/internal/acp"
 	"github.com/solosw/solcode/internal/agent"
 	cpanthropic "github.com/solosw/solcode/internal/anthropic"
 	"github.com/solosw/solcode/internal/app"
@@ -43,6 +44,7 @@ func main() {
 
 	var modelOverride string
 	var showVersion bool
+	var acpMode bool
 
 	flag.StringVar(&configPath, "config", "", "Path to JSON config file")
 	flag.StringVar(&prompt, "prompt", "", "Prompt to run non-interactively")
@@ -51,6 +53,7 @@ func main() {
 	flag.DurationVar(&timeout, "timeout", 0, "Maximum run duration (0 disables the timeout)")
 	flag.StringVar(&modelOverride, "model", "", "Override model (name or ID from config)")
 	flag.BoolVar(&showVersion, "version", false, "Print version and exit")
+	flag.BoolVar(&acpMode, "acp", false, "Run as an Agent Client Protocol server on stdio")
 	flag.Parse()
 
 	if showVersion {
@@ -58,8 +61,15 @@ func main() {
 		return
 	}
 
-	if prompt == "" && flag.NArg() > 0 {
-		prompt = flag.Arg(0)
+	if !acpMode && flag.NArg() > 0 {
+		switch strings.ToLower(strings.TrimSpace(flag.Arg(0))) {
+		case "acp":
+			acpMode = true
+		default:
+			if prompt == "" {
+				prompt = flag.Arg(0)
+			}
+		}
 	}
 
 	cfg, err := config.Load(configPath)
@@ -76,6 +86,18 @@ func main() {
 			fmt.Fprintf(os.Stderr, "model override: %v\n", err)
 			os.Exit(1)
 		}
+	}
+
+	if acpMode {
+		if prompt != "" {
+			fmt.Fprintln(os.Stderr, "--acp cannot be combined with --prompt")
+			os.Exit(1)
+		}
+		if err := runACP(cfg, timeout, maxTurns); err != nil {
+			fmt.Fprintf(os.Stderr, "run acp: %v\n", err)
+			os.Exit(1)
+		}
+		return
 	}
 
 	if prompt == "" {
@@ -160,6 +182,13 @@ func newAppWithSessionFallback(cfg config.Config, opts ...app.Option) (*app.App,
 		return nil, cfg, fmt.Errorf("create fallback session %q: %w", cfg.Session.DefaultSession, retryErr)
 	}
 	return application, cfg, nil
+}
+
+func runACP(cfg config.Config, timeout time.Duration, maxTurns int) error {
+	server := acp.NewServer(cfg, timeout, maxTurns, version, func(cfg config.Config, opts ...app.Option) (*app.App, config.Config, error) {
+		return newAppWithSessionFallback(cfg, opts...)
+	})
+	return server.Serve(context.Background(), os.Stdin, os.Stdout)
 }
 
 func runBatch(cfg config.Config, prompt string, timeout time.Duration, maxTurns int) error {

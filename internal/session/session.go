@@ -235,6 +235,14 @@ func (m *Manager) LoadOrCreate(ctx context.Context, id SessionID, workDir, model
 	return s, err
 }
 
+func (m *Manager) Load(ctx context.Context, id SessionID) (*Session, error) {
+	if m == nil || m.store == nil {
+		return nil, NotFoundError{ID: nonEmptyID(id, "main")}
+	}
+	id = nonEmptyID(id, m.DefaultID())
+	return m.store.Load(ctx, id)
+}
+
 // LoadOrCreateWithStatus returns whether the session was created for this
 // request. Callers use this to distinguish a new-session bootstrap from a
 // normal continuation without inferring it from an empty message list.

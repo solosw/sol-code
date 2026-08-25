@@ -8,6 +8,7 @@ A terminal-based coding agent powered by Claude (Anthropic API) that can read, w
 - **@ file attachments** — Type `@` to autocomplete and attach files from the working directory. Text files are inlined into the prompt; images are converted to multimodal image blocks for the model.
 - **Persistent sessions** — Reload saved conversation history with its original message timestamps. Project-scoped runtime state is stored outside the source tree under `~/.solcode/projects/<safe-project-path>/` (sessions, memories, todos, and knowledge graph).
 - **Batch mode** — Run one-shot prompts non-interactively via `-prompt`.
+- **ACP (Agent Client Protocol)** — Speak JSON-RPC over stdio with `solcode --acp` (or `solcode acp`) so editors like Zed can drive the same agent loop as the TUI.
 - **Multi-model support** — Configure multiple LLM providers and models, switch at runtime with `/model` (current provider only) and `/provider`, or add them directly from their dialogs.
 - **Native Anthropic transport** — The Anthropic Messages API uses a handwritten HTTP/JSON/SSE client, including streaming text, thinking, and tool-input deltas; the official SDK remains only for internal message compatibility.
 - **20+ built-in tools** — Bash, Edit, Write, View, ViewImage, Grep, Glob, LS, Diff, Patch, Fetch, WebSearch, LSP, MCP, TodoWrite, WriteMemory, ReadMemory, AskUser, Task (sub-agents), and more.
@@ -102,6 +103,10 @@ solcode
 # Batch mode
 solcode -prompt "Explain the architecture of this project"
 
+# Agent Client Protocol (stdio JSON-RPC)
+solcode --acp
+# or: solcode acp
+
 # Check binary version (master builds show master+<sha>)
 solcode -version
 ```
@@ -120,6 +125,7 @@ solcode [flags]
 | `-max-turns` | from config | Maximum model/tool loop turns |
 | `-timeout` | `0` (disabled) | Maximum run duration; `0` disables the per-conversation deadline |
 | `-model` | from config | Override model (name or ID) |
+| `-acp` | off | Run as an Agent Client Protocol server on stdio (mutually exclusive with `-prompt` / TUI) |
 
 Config auto-discovery looks for `~/.solcode/settings.json`, `~/.solcode/settings.local.json`, `./.solcode/settings.json`, and `./.solcode/settings.local.json` in order; later files merge on top.
 

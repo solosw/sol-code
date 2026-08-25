@@ -69,3 +69,11 @@ func TestFileStoreSessionLockPreventsSecondOwner(t *testing.T) {
 		t.Fatalf("Acquire after release: %v", err)
 	}
 }
+
+func TestManagerLoadMissingSession(t *testing.T) {
+	manager := NewManager(NewFileStore(t.TempDir()), "main")
+	_, err := manager.Load(context.Background(), "missing")
+	if !IsNotFound(err) {
+		t.Fatalf("Load missing session error = %v, want not found", err)
+	}
+}

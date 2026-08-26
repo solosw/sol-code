@@ -138,7 +138,7 @@ func (e *editTool) createFile(ctx context.Context, uctx *UseContext, filePath, c
 		return ErrorResult(fmt.Sprintf("error creating parent directories: %v", err)), nil
 	}
 
-	if err := os.WriteFile(filePath, []byte(content), 0o644); err != nil {
+	if err := WriteTextFileContent(ctx, uctx, filePath, content); err != nil {
 		return ErrorResult(fmt.Sprintf("error writing file: %v", err)), nil
 	}
 	recordFileChange(ctx, uctx, EditToolName, filePath, desc, "", content)
@@ -164,7 +164,7 @@ func (e *editTool) deleteContent(ctx context.Context, uctx *UseContext, filePath
 		return ErrorResult(fmt.Sprintf("path is a directory, not a file: %s", filePath)), nil
 	}
 
-	data, err := os.ReadFile(filePath)
+	data, err := ReadTextFileContent(ctx, uctx, filePath)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("error reading file: %v", err)), nil
 	}
@@ -182,7 +182,7 @@ func (e *editTool) deleteContent(ctx context.Context, uctx *UseContext, filePath
 
 	newContent := content[:index] + content[index+len(oldString):]
 
-	if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
+	if err := WriteTextFileContent(ctx, uctx, filePath, newContent); err != nil {
 		return ErrorResult(fmt.Sprintf("error writing file: %v", err)), nil
 	}
 	recordFileChange(ctx, uctx, EditToolName, filePath, desc, content, newContent)
@@ -208,7 +208,7 @@ func (e *editTool) replaceContent(ctx context.Context, uctx *UseContext, filePat
 		return ErrorResult(fmt.Sprintf("path is a directory, not a file: %s", filePath)), nil
 	}
 
-	data, err := os.ReadFile(filePath)
+	data, err := ReadTextFileContent(ctx, uctx, filePath)
 	if err != nil {
 		return ErrorResult(fmt.Sprintf("error reading file: %v", err)), nil
 	}
@@ -230,7 +230,7 @@ func (e *editTool) replaceContent(ctx context.Context, uctx *UseContext, filePat
 		return Result("New content is the same as old content. No changes made."), nil
 	}
 
-	if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
+	if err := WriteTextFileContent(ctx, uctx, filePath, newContent); err != nil {
 		return ErrorResult(fmt.Sprintf("error writing file: %v", err)), nil
 	}
 	recordFileChange(ctx, uctx, EditToolName, filePath, desc, content, newContent)

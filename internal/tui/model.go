@@ -1279,6 +1279,7 @@ func (m *Model) updateAutocomplete() tea.Cmd {
 		}
 		if len(matches) == 0 {
 			m.autocomplete = nil
+			m.resize()
 			return nil
 		}
 		m.autocomplete = &AutocompleteState{
@@ -1287,6 +1288,7 @@ func (m *Model) updateAutocomplete() tea.Cmd {
 			Prefix:   prefix,
 			Kind:     AutocompleteSlash,
 		}
+		m.resize()
 		return nil
 	}
 
@@ -1306,6 +1308,7 @@ func (m *Model) updateAutocomplete() tea.Cmd {
 		}
 		if len(matches) == 0 {
 			m.autocomplete = nil
+			m.resize()
 			return nil
 		}
 		selected := 0
@@ -1329,10 +1332,12 @@ func (m *Model) updateAutocomplete() tea.Cmd {
 			Kind:     AutocompleteFile,
 			AtStart:  atStart,
 		}
+		m.resize()
 		return nil
 	}
 
 	m.autocomplete = nil
+	m.resize()
 	return nil
 }
 
@@ -1650,6 +1655,13 @@ func (m *Model) updateTodosFromToolInput(msg ToolStartMsg) {
 	m.todos = append([]TodoViewItem(nil), payload.Todos...)
 }
 
+// WithTodosForTest replaces the on-screen todo strip. Tests only.
+func (m Model) WithTodosForTest(todos []TodoViewItem) Model {
+	m.todos = append([]TodoViewItem(nil), todos...)
+	m.resize()
+	return m
+}
+
 func (m *Model) updateAgentActivity(msg AgentStatusMsg) {
 	now := time.Now()
 	activity := AgentActivity{
@@ -1687,8 +1699,10 @@ func (m Model) View() tea.View {
 		}
 	}
 	parts = append(parts, m.renderSessionBar(), m.renderInput(), m.renderUsageBar())
-	if panel := m.renderActivityPanel(); panel != "" {
-		parts = append(parts, panel)
+	if m.autocomplete == nil {
+		if panel := m.renderActivityPanel(); panel != "" {
+			parts = append(parts, panel)
+		}
 	}
 	content := lipgloss.NewStyle().Width(m.width).Render(lipgloss.JoinVertical(lipgloss.Left, parts...))
 	view := tea.NewView(content)
@@ -2453,6 +2467,10 @@ func (m Model) layout() tuiLayout {
 	usageHeight := 1
 	dialogHeight := m.activeDialogHeight()
 	activityHeight := m.activityPanelHeight()
+	if m.autocomplete != nil {
+		// Completion UI temporarily owns the bottom chrome.
+		activityHeight = 0
+	}
 	return tuiLayout{
 		viewportHeight: max(1, m.height-inputHeight-statusHeight-dialogHeight-activityHeight),
 		inputWidth:     max(1, m.width-6),
@@ -2505,10 +2523,12 @@ func (m Model) maxAutocompleteListLines() int {
 	if m.height <= 0 {
 		return 8
 	}
-
-	// One row is required for the "Commands:" or "Files:" header. The
-	// remainder is the only space available to completion items.
-	return min(8, max(0, m.maxOverlayTotalHeight()-1))
+	// Keep a usable completion list; fitOverlay still clamps to the overlay budget.
+	budget := m.maxOverlayTotalHeight() - 1
+	if budget < 1 {
+		budget = 1
+	}
+	return min(8, budget)
 }
 
 func (m Model) maxOverlayListLines() int {
@@ -2543,7 +2563,14 @@ func (m Model) maxOverlayTotalHeight() int {
 	const inputHeight = 4
 	const statusHeight = 2
 	const minimumViewportHeight = 1
-	return max(0, m.height-inputHeight-statusHeight-m.activityPanelHeight()-minimumViewportHeight)
+	activity := m.activityPanelHeight()
+	// Slash/@ autocomplete is higher priority than the todo/agent strip. If both
+	// compete for the bottom chrome on a short terminal, prefer keeping the
+	// completion list visible.
+	if m.autocomplete != nil {
+		activity = 0
+	}
+	return max(0, m.height-inputHeight-statusHeight-activity-minimumViewportHeight)
 }
 
 // fitOverlay clamps overlay content so JoinVertical never exceeds the terminal.

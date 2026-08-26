@@ -8,7 +8,7 @@ A terminal-based coding agent powered by Claude (Anthropic API) that can read, w
 - **@ file attachments** — Type `@` to autocomplete and attach files from the working directory. Text files are inlined into the prompt; images are converted to multimodal image blocks for the model.
 - **Persistent sessions** — Reload saved conversation history with its original message timestamps. Project-scoped runtime state is stored outside the source tree under `~/.solcode/projects/<safe-project-path>/` (sessions, memories, todos, and knowledge graph).
 - **Batch mode** — Run one-shot prompts non-interactively via `-prompt`.
-- **ACP (Agent Client Protocol)** — Speak JSON-RPC over stdio with `solcode --acp` (or `solcode acp`) so editors like Zed can drive the same agent loop as the TUI.
+- **ACP (Agent Client Protocol)** — Speak JSON-RPC over stdio with `solcode --acp` (or `solcode acp`) so editors like Zed can drive the same agent loop as the TUI. Supports streaming updates, permissions, cancel, session modes/load, tool-call diffs, `agent_plan_update` from `TodoWrite`, and capability-gated client `fs/read_text_file` / `fs/write_text_file`.
 - **Multi-model support** — Configure multiple LLM providers and models, switch at runtime with `/model` (current provider only) and `/provider`, or add them directly from their dialogs.
 - **Native Anthropic transport** — The Anthropic Messages API uses a handwritten HTTP/JSON/SSE client, including streaming text, thinking, and tool-input deltas; the official SDK remains only for internal message compatibility.
 - **20+ built-in tools** — Bash, Edit, Write, View, ViewImage, Grep, Glob, LS, Diff, Patch, Fetch, WebSearch, LSP, MCP, TodoWrite, WriteMemory, ReadMemory, AskUser, Task (sub-agents), and more.
@@ -128,6 +128,30 @@ solcode [flags]
 | `-acp` | off | Run as an Agent Client Protocol server on stdio (mutually exclusive with `-prompt` / TUI) |
 
 Config auto-discovery looks for `~/.solcode/settings.json`, `~/.solcode/settings.local.json`, `./.solcode/settings.json`, and `./.solcode/settings.local.json` in order; later files merge on top.
+
+### Agent Client Protocol (ACP)
+
+Run solcode as an ACP agent so a compatible client (for example Zed) owns the UI while solcode runs the same tool loop:
+
+```bash
+solcode --acp
+# or: solcode acp
+```
+
+Notable session behavior:
+
+| Area | Behavior |
+|------|----------|
+| Streaming | Thought, message, tool-call, and usage updates over `session/update` |
+| Permissions | `session/request_permission` with allow/reject once or always; edit tools can include a diff preview |
+| Cancel | `session/cancel` cancels the in-flight prompt (`stopReason=cancelled`) |
+| Modes | `session/set_mode` maps to permission modes and emits `current_mode_update` |
+| History | `session/load` replays saved user/assistant turns |
+| Tool diffs | `Edit` / `Write` / `MultiEdit` / `MultiWrite` emit ACP `type: "diff"` content plus `locations` |
+| Plan updates | Successful `TodoWrite` calls emit a full `agent_plan_update`; when every item is `completed`, the agent sends `entries: []` (cleared plan) |
+| Client filesystem | When the client advertises FS capabilities at `initialize`, text tools use per-session `fs/read_text_file` and `fs/write_text_file`; otherwise they fall back to the local disk. `TodoWrite` always stays on the agent-local todo file (never client FS). In `bypass` / `goal` modes, writes also fall back to local disk so the client does not show a second file-accept prompt |
+
+Client FS access is capability-gated per session (captured at `session/new` / `session/load`). `ViewImage` stays on the local path because ACP text-file RPCs are text-only.
 
 ## TUI Controls
 
@@ -448,6 +472,7 @@ In **plan** mode, solcode prepends a planning system-style brief to every user m
 solcode/
 ├── cmd/solcode/main.go       # Entry point
 ├── internal/
+│   ├── acp/                   # Agent Client Protocol stdio server (JSON-RPC)
 │   ├── agent/                 # Coordinator & sub-agent orchestration
 │   ├── anthropic/             # Anthropic API client & message types
 │   ├── app/                   # Application lifecycle & wiring

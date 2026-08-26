@@ -35,18 +35,19 @@ type StreamEmitter struct {
 }
 
 type Server struct {
-	cfg         config.Config
-	timeout     time.Duration
-	maxTurns    int
-	version     string
-	newApp      AppFactory
-	runPrompt   PromptFunc
-	conn        *Conn
-	mu          sync.Mutex
-	initialized bool
-	sessions    map[string]*acpSession
-	sessionSeq  atomic.Uint64
-	toolCallSeq atomic.Uint64
+	cfg                config.Config
+	timeout            time.Duration
+	maxTurns           int
+	version            string
+	newApp             AppFactory
+	runPrompt          PromptFunc
+	conn               *Conn
+	mu                 sync.Mutex
+	initialized        bool
+	clientCapabilities ClientCapabilities
+	sessions           map[string]*acpSession
+	sessionSeq         atomic.Uint64
+	toolCallSeq        atomic.Uint64
 }
 
 type acpSession struct {
@@ -59,6 +60,9 @@ type acpSession struct {
 	cancel      context.CancelFunc
 	prompting   bool
 	toolCalls   map[string]string
+	// lastToolInput caches the most recent input per tool name for permission diffs.
+	lastToolInput  map[string]json.RawMessage
+	fsCapabilities FSClientCapabilities
 }
 
 func NewServer(cfg config.Config, timeout time.Duration, maxTurns int, version string, newApp AppFactory) *Server {
@@ -155,8 +159,13 @@ func (s *Server) handle(ctx context.Context, msg jsonrpcMessage) error {
 }
 
 func (s *Server) handleInitialize(msg jsonrpcMessage) error {
+	var params InitializeParams
+	if err := decodeParams(msg.Params, &params); err != nil {
+		return s.conn.ReplyError(msg.ID, JSONRPCInvalidParams, err.Error())
+	}
 	s.mu.Lock()
 	s.initialized = true
+	s.clientCapabilities = params.ClientCapabilities
 	s.mu.Unlock()
 	result := InitializeResult{
 		ProtocolVersion: ProtocolVersion,
@@ -372,15 +381,24 @@ func (s *Server) createSession(ctx context.Context, id, cwd string) (*acpSession
 		cfg.Session.Dir = config.DefaultSessionDir(cfg.WorkDir)
 	}
 
+	s.mu.Lock()
+	fsCapabilities := FSClientCapabilities{}
+	if s.clientCapabilities.FS != nil {
+		fsCapabilities = *s.clientCapabilities.FS
+	}
+	s.mu.Unlock()
 	sess := &acpSession{
-		id:        id,
-		diskID:    id,
-		workDir:   cfg.WorkDir,
-		cfg:       cfg,
-		toolCalls: make(map[string]string),
+		id:             id,
+		diskID:         id,
+		workDir:        cfg.WorkDir,
+		cfg:            cfg,
+		toolCalls:      make(map[string]string),
+		lastToolInput:  make(map[string]json.RawMessage),
+		fsCapabilities: fsCapabilities,
 	}
 
 	application, cfg, err := s.newApp(cfg,
+		app.WithTextFileSystem(s.textFileSystem(id, fsCapabilities)),
 		app.WithStreamCallbacks(
 			func(text string) { s.emitText(sess, "agent_message_chunk", text) },
 			func(text string) { s.emitText(sess, "agent_thought_chunk", text) },
@@ -481,7 +499,16 @@ func (s *Server) emitToolStart(sess *acpSession, name string, input json.RawMess
 	id := s.nextToolCallID()
 	sess.mu.Lock()
 	sess.toolCalls[name] = id
+	// Cache last input so permission prompts can attach the same diff preview.
+	if sess.lastToolInput == nil {
+		sess.lastToolInput = make(map[string]json.RawMessage)
+	}
+	if len(input) > 0 {
+		sess.lastToolInput[name] = append(json.RawMessage(nil), input...)
+	}
+	workDir := sess.workDir
 	sess.mu.Unlock()
+	diffs, locations := toolCallDiffs(name, input, workDir)
 	s.emitUpdate(sess.id, SessionUpdate{
 		SessionUpdate: "tool_call",
 		ToolCallID:    id,
@@ -489,6 +516,8 @@ func (s *Server) emitToolStart(sess *acpSession, name string, input json.RawMess
 		Kind:          toolKind(name),
 		Status:        ToolCallInProgress,
 		RawInput:      input,
+		ToolContent:   diffs,
+		Locations:     locations,
 	})
 }
 
@@ -498,7 +527,9 @@ func (s *Server) emitToolDone(sess *acpSession, name, output string, isError boo
 	}
 	sess.mu.Lock()
 	id := sess.toolCalls[name]
+	input := append(json.RawMessage(nil), sess.lastToolInput[name]...)
 	delete(sess.toolCalls, name)
+	delete(sess.lastToolInput, name)
 	sess.mu.Unlock()
 	if id == "" {
 		id = s.nextToolCallID()
@@ -518,6 +549,37 @@ func (s *Server) emitToolDone(sess *acpSession, name, output string, isError boo
 			Content: &ContentBlock{Type: "text", Text: output},
 		}},
 	})
+	if name == tool.TodoWriteToolName && !isError {
+		s.emitPlanUpdate(sess, input)
+	}
+}
+
+func (s *Server) emitPlanUpdate(sess *acpSession, input json.RawMessage) {
+	if sess == nil || len(input) == 0 {
+		return
+	}
+	var params tool.TodoWriteParams
+	if err := json.Unmarshal(input, &params); err != nil {
+		return
+	}
+	entries := make([]PlanEntry, 0, len(params.Todos))
+	allCompleted := len(params.Todos) > 0
+	for _, todo := range params.Todos {
+		entries = append(entries, PlanEntry{
+			Content:  todo.Content,
+			Priority: todo.Priority,
+			Status:   todo.Status,
+		})
+		if todo.Status != "completed" {
+			allCompleted = false
+		}
+	}
+	// TodoWrite clears its persisted list once every item is completed; mirror
+	// that final state so clients replace their displayed plan with an empty one.
+	if allCompleted {
+		entries = []PlanEntry{}
+	}
+	s.emitUpdate(sess.id, SessionUpdate{SessionUpdate: "agent_plan_update", PlanEntries: entries})
 }
 
 func (s *Server) requestPermission(sess *acpSession, toolName, description string) bool {
@@ -526,7 +588,26 @@ func (s *Server) requestPermission(sess *acpSession, toolName, description strin
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	id := s.nextToolCallID()
+
+	sess.mu.Lock()
+	id := sess.toolCalls[toolName]
+	input := sess.lastToolInput[toolName]
+	workDir := sess.workDir
+	sess.mu.Unlock()
+	if id == "" {
+		id = s.nextToolCallID()
+	}
+
+	content := []ToolCallContent{{
+		Type:    "content",
+		Content: &ContentBlock{Type: "text", Text: description},
+	}}
+	var locations []ToolCallLocation
+	if diffs, locs := toolCallDiffs(toolName, input, workDir); len(diffs) > 0 || len(locs) > 0 {
+		content = append(content, diffs...)
+		locations = locs
+	}
+
 	var result RequestPermissionResult
 	err := s.conn.Call(ctx, MethodSessionRequestPermission, RequestPermissionParams{
 		SessionID: sess.id,
@@ -535,7 +616,9 @@ func (s *Server) requestPermission(sess *acpSession, toolName, description strin
 			Title:      toolName,
 			Kind:       toolKind(toolName),
 			Status:     ToolCallPending,
-			Content:    []ContentBlock{{Type: "text", Text: description}},
+			RawInput:   input,
+			Content:    content,
+			Locations:  locations,
 		},
 		Options: defaultPermissionOptions(),
 	}, &result)
@@ -587,7 +670,10 @@ func (s *Server) askUser(ctx context.Context, sess *acpSession, params tool.AskU
 				Title:      header,
 				Kind:       "other",
 				Status:     ToolCallPending,
-				Content:    []ContentBlock{{Type: "text", Text: question.Question}},
+				Content: []ToolCallContent{{
+					Type:    "content",
+					Content: &ContentBlock{Type: "text", Text: question.Question},
+				}},
 			},
 			Options: options,
 		}, &result)

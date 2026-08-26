@@ -590,7 +590,10 @@ func (s *Server) requestChoice(ctx context.Context, sess *acpSession, title, que
 			Title:      title,
 			Kind:       "other",
 			Status:     ToolCallPending,
-			Content:    []ContentBlock{{Type: "text", Text: question}},
+			Content: []ToolCallContent{{
+				Type:    "content",
+				Content: &ContentBlock{Type: "text", Text: question},
+			}},
 		},
 		Options: options,
 	}, &result)

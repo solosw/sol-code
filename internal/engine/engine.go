@@ -64,6 +64,7 @@ type Config struct {
 	ThinkingText     bool
 	Effort           string
 	TodoPath         string
+	TextFileSystem   tool.TextFileSystem
 	OnTextDelta      func(string)
 	OnThinkingDelta  func(string)
 	OnToolStart      func(name string, input json.RawMessage)
@@ -338,13 +339,14 @@ func (e *Engine) runMessagesLoop(ctx context.Context, runReq RunRequest) RunResu
 				Input: input,
 			}, ToolEnv{
 				UseContext: &tool.UseContext{
-					SessionID:  nonEmpty(runReq.SessionID, string(cfg.ID)),
-					MessageID:  use.ID,
-					WorkDir:    cfg.WorkDir,
-					SkillRoots: orderedSkillRoots(activeSkillRoot, e.config.SkillRoots),
-					AgentID:    string(cfg.ID),
-					TodoPath:   e.config.TodoPath,
-					FastModel:  e.config.FastModelName,
+					SessionID:      nonEmpty(runReq.SessionID, string(cfg.ID)),
+					MessageID:      use.ID,
+					WorkDir:        cfg.WorkDir,
+					SkillRoots:     orderedSkillRoots(activeSkillRoot, e.config.SkillRoots),
+					AgentID:        string(cfg.ID),
+					TodoPath:       e.config.TodoPath,
+					FastModel:      e.config.FastModelName,
+					TextFileSystem: e.config.TextFileSystem,
 					Status: func(status string) {
 						if e.config.OnStatus != nil {
 							e.config.OnStatus(status)

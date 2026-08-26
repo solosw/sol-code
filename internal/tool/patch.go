@@ -98,7 +98,7 @@ func (p *patchTool) Invoke(ctx context.Context, uctx *UseContext, input json.Raw
 	}
 
 	// Read current file content
-	data, err := os.ReadFile(filePath)
+	data, err := ReadTextFileContent(ctx, uctx, filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return ErrorResult(fmt.Sprintf("file not found: %s", filePath)), nil
@@ -118,7 +118,7 @@ func (p *patchTool) Invoke(ctx context.Context, uctx *UseContext, input json.Raw
 	}
 
 	// Write the patched content
-	if err := os.WriteFile(filePath, []byte(newContent), 0o644); err != nil {
+	if err := WriteTextFileContent(ctx, uctx, filePath, newContent); err != nil {
 		return ErrorResult(fmt.Sprintf("error writing file: %v", err)), nil
 	}
 	recordFileChange(ctx, uctx, PatchToolName, filePath, desc, oldContent, newContent)

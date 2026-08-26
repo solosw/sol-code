@@ -24,6 +24,18 @@ ACP p0+p1+p2: Agent Client Protocol stdio server so editors can drive the same a
 - [x] `resource_link` / embedded context is folded into the prompt text.
 - [x] Session bootstrap emits available commands and current mode.
 
+## P3 — Tool call diffs for client UI
+
+- [x] Emit ACP `type: "diff"` content on Edit/Write/MultiEdit/MultiWrite tool calls.
+- [x] Include `locations` for follow-along.
+- [x] Attach the same diff preview on `session/request_permission` when input is available.
+
+## P4 — ACP plan updates and client filesystem
+
+- [x] Map successful TodoWrite calls to complete `agent_plan_update` entries.
+- [x] Add per-session, capability-gated `fs/read_text_file` / `fs/write_text_file` client filesystem access.
+- [x] Route text file tools through the client filesystem when the matching capability is advertised, with local fallback otherwise.
+
 ## Validation
 
 - [x] `go test ./internal/acp/ ./internal/session/` — ok.

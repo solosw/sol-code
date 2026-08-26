@@ -113,3 +113,48 @@ func TestTodoWriteTool_FallsBackToWorkDirTodos(t *testing.T) {
 		t.Fatalf("unexpected saved todos: %#v", saved)
 	}
 }
+
+type recordingTextFileSystem struct {
+	writes int
+}
+
+func (r *recordingTextFileSystem) CanReadTextFile() bool  { return true }
+func (r *recordingTextFileSystem) CanWriteTextFile() bool { return true }
+func (r *recordingTextFileSystem) ReadTextFile(context.Context, string) (string, error) {
+	return "", nil
+}
+func (r *recordingTextFileSystem) WriteTextFile(context.Context, string, string) error {
+	r.writes++
+	return nil
+}
+
+func TestTodoWriteTool_IgnoresClientTextFileSystem(t *testing.T) {
+	tw := tool.NewTodoWriteTool()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "todos.json")
+	fs := &recordingTextFileSystem{}
+	uctx := &tool.UseContext{
+		SessionID:      "test",
+		MessageID:      "msg1",
+		WorkDir:        dir,
+		TodoPath:       path,
+		TextFileSystem: fs,
+	}
+
+	input, _ := json.Marshal(map[string]interface{}{
+		"todos": []tool.TodoItem{{ID: "1", Content: "Local only", Status: "pending", Priority: "high"}},
+	})
+	result, err := tw.Invoke(context.Background(), uctx, input)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("unexpected error result: %s", result.Text)
+	}
+	if fs.writes != 0 {
+		t.Fatalf("TodoWrite must not use client filesystem, writes=%d", fs.writes)
+	}
+	if _, err := os.ReadFile(path); err != nil {
+		t.Fatalf("expected local todos file: %v", err)
+	}
+}

@@ -114,11 +114,13 @@ func (t *todoWriteTool) Invoke(ctx context.Context, uctx *UseContext, input json
 		verificationNudge = !hasVerif
 	}
 
-	// Persist to disk
+	// Persist to the agent-local todo file only. Never route through an ACP client
+	// filesystem: todos are session bookkeeping, and client fs/write_text_file
+	// would surface a misleading file-modification prompt on plan updates.
 	dir := filepath.Dir(path)
 	_ = os.MkdirAll(dir, 0o755)
 	b, _ := json.MarshalIndent(newTodos, "", "  ")
-	if err := os.WriteFile(path, b, 0o644); err != nil {
+	if err := WriteTextFileContent(ctx, nil, path, string(b)); err != nil {
 		return ErrorResult("failed to write todos: " + err.Error()), nil
 	}
 
@@ -155,7 +157,7 @@ func todoPath(uctx *UseContext) string {
 }
 
 func readExistingTodos(path string) []TodoItem {
-	data, err := os.ReadFile(path)
+	data, err := ReadTextFileContent(context.Background(), nil, path)
 	if err != nil {
 		return nil
 	}

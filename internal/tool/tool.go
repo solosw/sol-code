@@ -10,6 +10,15 @@ import (
 )
 
 // UseContext carries contextual information for a tool invocation.
+// TextFileSystem provides client-owned text file access for a tool invocation.
+// ACP sessions use it when the connected client advertises fs capabilities.
+type TextFileSystem interface {
+	CanReadTextFile() bool
+	CanWriteTextFile() bool
+	ReadTextFile(ctx context.Context, path string) (string, error)
+	WriteTextFile(ctx context.Context, path, content string) error
+}
+
 type UseContext struct {
 	SessionID string
 	MessageID string
@@ -23,6 +32,7 @@ type UseContext struct {
 	FastModel        string
 	Status           func(string)
 	TaskRetryDelay   time.Duration
+	TextFileSystem   TextFileSystem
 	RecordFileChange func(ctx context.Context, change FileChange)
 	AskUser          func(ctx context.Context, params AskUserParams) (map[string]string, error)
 }

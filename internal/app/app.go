@@ -65,6 +65,7 @@ type App struct {
 	onStatus        func(string)
 	onModeChange    func(permission.Mode) error
 	onAskUser       func(ctx context.Context, params tool.AskUserParams) (map[string]string, error)
+	textFileSystem  tool.TextFileSystem
 	queuedPrompts   func() []string
 }
 
@@ -80,6 +81,7 @@ type options struct {
 	onStatus        func(string)
 	onModeChange    func(permission.Mode) error
 	onAskUser       func(ctx context.Context, params tool.AskUserParams) (map[string]string, error)
+	textFileSystem  tool.TextFileSystem
 	queuedPrompts   func() []string
 }
 
@@ -138,6 +140,12 @@ func WithStatusCallback(onStatus func(string)) Option {
 func WithModeChangeCallback(onModeChange func(permission.Mode) error) Option {
 	return func(o *options) {
 		o.onModeChange = onModeChange
+	}
+}
+
+func WithTextFileSystem(textFileSystem tool.TextFileSystem) Option {
+	return func(o *options) {
+		o.textFileSystem = textFileSystem
 	}
 }
 
@@ -209,9 +217,10 @@ func New(cfg config.Config, opts ...Option) (*App, error) {
 		onStatus:         options.onStatus,
 		onModeChange:     options.onModeChange,
 		onAskUser:        options.onAskUser,
+		textFileSystem:   options.textFileSystem,
 		queuedPrompts:    options.queuedPrompts,
 	}
-	eng := engine.NewEngine(engineConfig(cfg, client, runtime, registry, permissions, options.onTextDelta, options.onThinkingDelta, options.onToolStart, options.onToolDone, application.emitUsage, options.onStatus, options.onAskUser, options.queuedPrompts, recordFileChange, application.compactMessagesMidRun))
+	eng := engine.NewEngine(engineConfig(cfg, client, runtime, registry, permissions, options.onTextDelta, options.onThinkingDelta, options.onToolStart, options.onToolDone, application.emitUsage, options.onStatus, options.onAskUser, options.textFileSystem, options.queuedPrompts, recordFileChange, application.compactMessagesMidRun))
 	coordinator := agent.NewCoordinator(eng)
 	registry.Register(tool.NewTaskTool(coordinator))
 	registry.Register(tool.NewModeSwitchToolWithGoal(application.SwitchMode, application.startGoalFlow))
@@ -439,7 +448,7 @@ func (a *App) SwitchModel(cfg config.Config) error {
 			PromotionConfidence:      cfg.Memory.PromotionConfidence,
 		}}).WithRetrievalBudget(cfg.Memory.RetrievalM2Limit, cfg.Memory.RetrievalM3Limit, cfg.Memory.RetrievalM4Limit, cfg.Memory.RetrievalM5Limit)
 	}
-	a.Engine.UpdateConfig(engineConfig(cfg, client, a.Hooks, a.Tools, a.Permissions, a.onTextDelta, a.onThinkingDelta, a.onToolStart, a.onToolDone, a.emitUsage, a.onStatus, a.onAskUser, a.queuedPrompts, newFileChangeRecorder(a.ChangeGraph), a.compactMessagesMidRun))
+	a.Engine.UpdateConfig(engineConfig(cfg, client, a.Hooks, a.Tools, a.Permissions, a.onTextDelta, a.onThinkingDelta, a.onToolStart, a.onToolDone, a.emitUsage, a.onStatus, a.onAskUser, a.textFileSystem, a.queuedPrompts, newFileChangeRecorder(a.ChangeGraph), a.compactMessagesMidRun))
 	return nil
 }
 
@@ -496,7 +505,7 @@ func (a *App) ReloadFeatures(cfg config.Config, mcpFactory mcp.ClientFactory) er
 	} else {
 		a.MemoryManager = nil
 	}
-	a.Engine.UpdateConfig(engineConfig(cfg, a.Client, a.Hooks, a.Tools, a.Permissions, a.onTextDelta, a.onThinkingDelta, a.onToolStart, a.onToolDone, a.emitUsage, a.onStatus, a.onAskUser, a.queuedPrompts, newFileChangeRecorder(a.ChangeGraph), a.compactMessagesMidRun))
+	a.Engine.UpdateConfig(engineConfig(cfg, a.Client, a.Hooks, a.Tools, a.Permissions, a.onTextDelta, a.onThinkingDelta, a.onToolStart, a.onToolDone, a.emitUsage, a.onStatus, a.onAskUser, a.textFileSystem, a.queuedPrompts, newFileChangeRecorder(a.ChangeGraph), a.compactMessagesMidRun))
 	return nil
 }
 
@@ -2749,7 +2758,7 @@ func memoryModelName(cfg config.Config) string {
 	return cfg.Model
 }
 
-func engineConfig(cfg config.Config, client *cpanthropic.Client, runtime *hook.Runtime, registry *tool.Registry, permissions *permission.Service, onTextDelta, onThinkingDelta func(string), onToolStart func(name string, input json.RawMessage), onToolDone func(name string, output string, isError bool), onUsage func(engine.Usage), onStatus func(string), onAskUser func(ctx context.Context, params tool.AskUserParams) (map[string]string, error), queuedPrompts func() []string, recordFileChange func(ctx context.Context, uctx *tool.UseContext, change tool.FileChange), compactMessages func(ctx context.Context, messages []sdk.MessageParam) ([]sdk.MessageParam, error)) engine.Config {
+func engineConfig(cfg config.Config, client *cpanthropic.Client, runtime *hook.Runtime, registry *tool.Registry, permissions *permission.Service, onTextDelta, onThinkingDelta func(string), onToolStart func(name string, input json.RawMessage), onToolDone func(name string, output string, isError bool), onUsage func(engine.Usage), onStatus func(string), onAskUser func(ctx context.Context, params tool.AskUserParams) (map[string]string, error), textFileSystem tool.TextFileSystem, queuedPrompts func() []string, recordFileChange func(ctx context.Context, uctx *tool.UseContext, change tool.FileChange), compactMessages func(ctx context.Context, messages []sdk.MessageParam) ([]sdk.MessageParam, error)) engine.Config {
 	skillRegistry := loadSkills(cfg)
 	return engine.Config{
 		Client:           client,
@@ -2771,6 +2780,7 @@ func engineConfig(cfg config.Config, client *cpanthropic.Client, runtime *hook.R
 		ThinkingText:     cfg.ThinkingText,
 		Effort:           cfg.Effort,
 		TodoPath:         config.DefaultTodoPath(cfg.WorkDir),
+		TextFileSystem:   textFileSystem,
 		OnTextDelta:      onTextDelta,
 		OnThinkingDelta:  onThinkingDelta,
 		OnToolStart:      onToolStart,

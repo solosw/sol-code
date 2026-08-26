@@ -586,6 +586,25 @@ func TestTUIModelSlashCompactAutocomplete(t *testing.T) {
 	}
 }
 
+func TestTUIModelSlashAutocompleteVisibleWithTodos(t *testing.T) {
+	model := newTUI(t)
+	// Simulate a populated todo strip that previously competed with the slash
+	// completion overlay for bottom chrome height.
+	model = model.WithTodosForTest([]tui.TodoViewItem{
+		{ID: "1", Content: "Task one", Status: "in_progress", Priority: "high"},
+		{ID: "2", Content: "Task two", Status: "pending", Priority: "medium"},
+		{ID: "3", Content: "Task three", Status: "pending", Priority: "low"},
+	})
+	model, _ = setInputValue(model, "/")
+	view := model.View().Content
+	if !strings.Contains(view, "Commands:") {
+		t.Fatalf("expected slash autocomplete header with todos present: %s", view)
+	}
+	if !strings.Contains(view, "/help") {
+		t.Fatalf("expected slash command suggestions with todos present: %s", view)
+	}
+}
+
 func TestTUIModelFileAutocompleteAndApply(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "alpha.go"), []byte("package alpha"), 0o644); err != nil {

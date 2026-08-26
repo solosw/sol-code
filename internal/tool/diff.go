@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"github.com/sergi/go-diff/diffmatchpatch"
@@ -73,7 +72,7 @@ func (d *diffTool) Invoke(ctx context.Context, uctx *UseContext, input json.RawM
 	}
 
 	var oldContent string
-	if data, err := os.ReadFile(filePath); err == nil {
+	if data, err := ReadTextFileContent(ctx, uctx, filePath); err == nil {
 		oldContent = string(data)
 	}
 

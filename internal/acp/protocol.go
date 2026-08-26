@@ -3,6 +3,7 @@ package acp
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/solosw/solcode/internal/permission"
 )
@@ -19,6 +20,8 @@ const (
 	MethodSessionSetMode           = "session/set_mode"
 	MethodSessionUpdate            = "session/update"
 	MethodSessionRequestPermission = "session/request_permission"
+	MethodFSReadTextFile           = "fs/read_text_file"
+	MethodFSWriteTextFile          = "fs/write_text_file"
 
 	StopReasonEndTurn   = "end_turn"
 	StopReasonCancelled = "cancelled"
@@ -84,6 +87,23 @@ type ClientCapabilities struct {
 type FSClientCapabilities struct {
 	ReadTextFile  bool `json:"readTextFile,omitempty"`
 	WriteTextFile bool `json:"writeTextFile,omitempty"`
+}
+
+type FSReadTextFileParams struct {
+	SessionID string `json:"sessionId"`
+	Path      string `json:"path"`
+	Line      *int   `json:"line,omitempty"`
+	Limit     *int   `json:"limit,omitempty"`
+}
+
+type FSReadTextFileResult struct {
+	Content string `json:"content"`
+}
+
+type FSWriteTextFileParams struct {
+	SessionID string `json:"sessionId"`
+	Path      string `json:"path"`
+	Content   string `json:"content"`
 }
 
 type InitializeResult struct {
@@ -205,15 +225,67 @@ type SessionUpdate struct {
 	RawInput          json.RawMessage
 	RawOutput         json.RawMessage
 	ToolContent       []ToolCallContent
+	Locations         []ToolCallLocation
+	PlanEntries       []PlanEntry
 	AvailableCommands []AvailableCommand
 	CurrentModeID     string
 	Message           string
 	Usage             *UsageUpdate
 }
 
+// PlanEntry is the client-facing representation of a TodoWrite item.
+type PlanEntry struct {
+	Content  string `json:"content"`
+	Priority string `json:"priority"`
+	Status   string `json:"status"`
+}
+
+// ToolCallContent is ACP tool-call content: regular content, file diffs, or terminals.
 type ToolCallContent struct {
-	Type    string        `json:"type"`
-	Content *ContentBlock `json:"content,omitempty"`
+	Type       string        `json:"type"`
+	Content    *ContentBlock `json:"content,omitempty"`
+	Path       string        `json:"path,omitempty"`
+	OldText    *string       `json:"oldText,omitempty"`
+	NewText    string        `json:"newText,omitempty"`
+	TerminalID string        `json:"terminalId,omitempty"`
+}
+
+// ToolCallLocation lets clients follow which file a tool call touches.
+type ToolCallLocation struct {
+	Path string `json:"path"`
+	Line *int   `json:"line,omitempty"`
+}
+
+func (c ToolCallContent) MarshalJSON() ([]byte, error) {
+	switch strings.TrimSpace(c.Type) {
+	case "diff":
+		payload := map[string]any{
+			"type":    "diff",
+			"path":    c.Path,
+			"newText": c.NewText,
+		}
+		// ACP uses null oldText for newly created files.
+		if c.OldText == nil {
+			payload["oldText"] = nil
+		} else {
+			payload["oldText"] = *c.OldText
+		}
+		return json.Marshal(payload)
+	case "terminal":
+		return json.Marshal(map[string]any{
+			"type":       "terminal",
+			"terminalId": c.TerminalID,
+		})
+	default:
+		payload := map[string]any{"type": c.Type}
+		if c.Type == "" {
+			payload["type"] = "content"
+		}
+		if c.Content != nil {
+			payload["content"] = c.Content
+		}
+		return json.Marshal(payload)
+	}
 }
 
 func (u SessionUpdate) MarshalJSON() ([]byte, error) {
@@ -242,7 +314,13 @@ func (u SessionUpdate) MarshalJSON() ([]byte, error) {
 	if len(u.ToolContent) > 0 {
 		payload["content"] = u.ToolContent
 	}
-	if len(u.AvailableCommands) > 0 {
+	if len(u.Locations) > 0 {
+		payload["locations"] = u.Locations
+	}
+	if len(u.PlanEntries) > 0 || u.SessionUpdate == "agent_plan_update" {
+		payload["entries"] = u.PlanEntries
+	}
+	if len(u.AvailableCommands) > 0 || u.SessionUpdate == "available_commands_update" {
 		payload["availableCommands"] = u.AvailableCommands
 	}
 	if u.CurrentModeID != "" {
@@ -282,6 +360,12 @@ func (u *SessionUpdate) UnmarshalJSON(data []byte) error {
 	}
 	if raw, ok := payload["rawOutput"]; ok {
 		u.RawOutput = raw
+	}
+	if raw, ok := payload["locations"]; ok {
+		_ = json.Unmarshal(raw, &u.Locations)
+	}
+	if raw, ok := payload["entries"]; ok {
+		_ = json.Unmarshal(raw, &u.PlanEntries)
 	}
 	if raw, ok := payload["availableCommands"]; ok {
 		_ = json.Unmarshal(raw, &u.AvailableCommands)
@@ -346,12 +430,13 @@ type RequestPermissionParams struct {
 }
 
 type ToolCallUpdate struct {
-	ToolCallID string          `json:"toolCallId"`
-	Title      string          `json:"title,omitempty"`
-	Kind       string          `json:"kind,omitempty"`
-	Status     string          `json:"status,omitempty"`
-	RawInput   json.RawMessage `json:"rawInput,omitempty"`
-	Content    []ContentBlock  `json:"content,omitempty"`
+	ToolCallID string             `json:"toolCallId"`
+	Title      string             `json:"title,omitempty"`
+	Kind       string             `json:"kind,omitempty"`
+	Status     string             `json:"status,omitempty"`
+	RawInput   json.RawMessage    `json:"rawInput,omitempty"`
+	Content    []ToolCallContent  `json:"content,omitempty"`
+	Locations  []ToolCallLocation `json:"locations,omitempty"`
 }
 
 type PermissionOption struct {

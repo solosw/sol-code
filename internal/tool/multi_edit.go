@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -105,7 +104,7 @@ func (t *multiEditTool) Invoke(ctx context.Context, uctx *UseContext, input json
 		}
 		file := byPath[path]
 		if file == nil {
-			data, err := os.ReadFile(path)
+			data, err := ReadTextFileContent(ctx, uctx, path)
 			existed := err == nil
 			if err != nil && !os.IsNotExist(err) {
 				return ErrorResult(fmt.Sprintf("edits[%d]: read %s: %v", index, path, err)), nil
@@ -122,7 +121,7 @@ func (t *multiEditTool) Invoke(ctx context.Context, uctx *UseContext, input json
 		}
 	}
 
-	if err := commitStagedEdits(files); err != nil {
+	if err := commitStagedEdits(ctx, uctx, files); err != nil {
 		return ErrorResult(err.Error()), nil
 	}
 
@@ -159,15 +158,11 @@ func applyStagedEdit(file *stagedEditFile, edit EditParams) error {
 	return nil
 }
 
-func commitStagedEdits(files []*stagedEditFile) error {
+func commitStagedEdits(ctx context.Context, uctx *UseContext, files []*stagedEditFile) error {
 	committed := make([]*stagedEditFile, 0, len(files))
 	for _, file := range files {
-		if err := os.MkdirAll(filepath.Dir(file.path), 0o755); err != nil {
-			rollbackStagedEdits(committed)
-			return fmt.Errorf("create parent directory for %s: %w", file.path, err)
-		}
-		if err := os.WriteFile(file.path, []byte(file.after), 0o644); err != nil {
-			rollbackStagedEdits(committed)
+		if err := WriteTextFileContent(ctx, uctx, file.path, file.after); err != nil {
+			rollbackStagedEdits(ctx, uctx, committed)
 			return fmt.Errorf("write %s: %w", file.path, err)
 		}
 		committed = append(committed, file)
@@ -175,12 +170,16 @@ func commitStagedEdits(files []*stagedEditFile) error {
 	return nil
 }
 
-func rollbackStagedEdits(files []*stagedEditFile) {
+func rollbackStagedEdits(ctx context.Context, uctx *UseContext, files []*stagedEditFile) {
 	for index := len(files) - 1; index >= 0; index-- {
 		file := files[index]
 		if file.existed {
-			_ = os.WriteFile(file.path, []byte(file.before), 0o644)
-		} else {
+			_ = WriteTextFileContent(ctx, uctx, file.path, file.before)
+			continue
+		}
+		// ACP exposes no delete-text-file operation. For client-backed new files,
+		// retain the empty file rather than mutating the local filesystem.
+		if uctx == nil || uctx.TextFileSystem == nil || !uctx.TextFileSystem.CanWriteTextFile() {
 			_ = os.Remove(file.path)
 		}
 	}

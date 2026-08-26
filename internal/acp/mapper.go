@@ -11,6 +11,7 @@ import (
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/solosw/solcode/internal/engine"
 	"github.com/solosw/solcode/internal/session"
+	"github.com/solosw/solcode/internal/tool"
 )
 
 func promptToText(blocks []ContentBlock, workDir string) string {
@@ -243,6 +244,197 @@ func toolKind(name string) string {
 	default:
 		return "other"
 	}
+}
+
+// toolCallDiffs builds ACP diff content + locations from file-mutating tool input.
+// Best-effort preview for client display; execution still happens in the tools.
+func toolCallDiffs(name string, input json.RawMessage, workDir string) (content []ToolCallContent, locations []ToolCallLocation) {
+	uctx := &tool.UseContext{WorkDir: strings.TrimSpace(workDir)}
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case strings.ToLower(tool.EditToolName):
+		var params tool.EditParams
+		if err := json.Unmarshal(input, &params); err != nil || strings.TrimSpace(params.FilePath) == "" {
+			return nil, nil
+		}
+		path := tool.ResolvePath(uctx, params.FilePath)
+		oldText, existed, err := readFileText(path)
+		if err != nil {
+			return nil, toolLocations(path)
+		}
+		newText, ok := previewEdit(oldText, existed, params)
+		if !ok {
+			return nil, toolLocations(path)
+		}
+		return []ToolCallContent{diffContent(path, oldText, newText, existed)}, toolLocations(path)
+
+	case strings.ToLower(tool.WriteToolName):
+		var params tool.WriteParams
+		if err := json.Unmarshal(input, &params); err != nil || strings.TrimSpace(params.FilePath) == "" {
+			return nil, nil
+		}
+		path := tool.ResolvePath(uctx, params.FilePath)
+		oldText, existed, err := readFileText(path)
+		if err != nil {
+			return nil, toolLocations(path)
+		}
+		return []ToolCallContent{diffContent(path, oldText, params.Content, existed)}, toolLocations(path)
+
+	case strings.ToLower(tool.MultiWriteToolName):
+		var params tool.MultiWriteParams
+		if err := json.Unmarshal(input, &params); err != nil || len(params.Files) == 0 {
+			return nil, nil
+		}
+		for _, file := range params.Files {
+			if strings.TrimSpace(file.FilePath) == "" {
+				continue
+			}
+			path := tool.ResolvePath(uctx, file.FilePath)
+			oldText, existed, err := readFileText(path)
+			if err != nil {
+				locations = append(locations, ToolCallLocation{Path: path})
+				continue
+			}
+			content = append(content, diffContent(path, oldText, file.Content, existed))
+			locations = append(locations, ToolCallLocation{Path: path})
+		}
+		return content, locations
+
+	case strings.ToLower(tool.MultiEditToolName):
+		var params tool.MultiEditParams
+		if err := json.Unmarshal(input, &params); err != nil || len(params.Edits) == 0 {
+			return nil, nil
+		}
+		type staged struct {
+			path    string
+			before  string
+			after   string
+			existed bool
+		}
+		order := make([]string, 0)
+		byPath := make(map[string]*staged)
+		for _, edit := range params.Edits {
+			if strings.TrimSpace(edit.FilePath) == "" {
+				continue
+			}
+			path := tool.ResolvePath(uctx, edit.FilePath)
+			file := byPath[path]
+			if file == nil {
+				oldText, existed, err := readFileText(path)
+				if err != nil {
+					continue
+				}
+				file = &staged{path: path, before: oldText, after: oldText, existed: existed}
+				byPath[path] = file
+				order = append(order, path)
+			}
+			next, ok := previewEdit(file.after, file.existed || file.after != "", edit)
+			if !ok {
+				// Keep path for follow-along even if preview fails.
+				continue
+			}
+			file.after = next
+			if edit.OldString == "" {
+				file.existed = false
+			}
+		}
+		for _, path := range order {
+			file := byPath[path]
+			if file == nil || file.before == file.after {
+				locations = append(locations, ToolCallLocation{Path: path})
+				continue
+			}
+			content = append(content, diffContent(file.path, file.before, file.after, file.existed && file.before != ""))
+			locations = append(locations, ToolCallLocation{Path: path})
+		}
+		return content, locations
+
+	case strings.ToLower(tool.PatchToolName):
+		var params tool.PatchParams
+		if err := json.Unmarshal(input, &params); err != nil || strings.TrimSpace(params.FilePath) == "" {
+			return nil, nil
+		}
+		path := tool.ResolvePath(uctx, params.FilePath)
+		// Patch apply lives inside the tool; expose path + patch text for UI.
+		return []ToolCallContent{{
+			Type: "content",
+			Content: &ContentBlock{
+				Type: "text",
+				Text: fmt.Sprintf("Patch %s\n\n%s", path, params.PatchText),
+			},
+		}}, toolLocations(path)
+
+	default:
+		return nil, nil
+	}
+}
+
+func readFileText(path string) (text string, existed bool, err error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", false, nil
+		}
+		return "", false, err
+	}
+	return string(data), true, nil
+}
+
+func previewEdit(current string, existed bool, params tool.EditParams) (string, bool) {
+	// Create file (or overwrite empty create path used by Edit).
+	if params.OldString == "" {
+		if existed && current != "" {
+			return "", false
+		}
+		return params.NewString, true
+	}
+	if !existed && current == "" {
+		return "", false
+	}
+	// Delete content
+	if params.NewString == "" {
+		index := strings.Index(current, params.OldString)
+		if index < 0 {
+			return "", false
+		}
+		if strings.LastIndex(current, params.OldString) != index {
+			return "", false
+		}
+		return current[:index] + current[index+len(params.OldString):], true
+	}
+	// Replace content
+	index := strings.Index(current, params.OldString)
+	if index < 0 {
+		return "", false
+	}
+	if strings.LastIndex(current, params.OldString) != index {
+		return "", false
+	}
+	return current[:index] + params.NewString + current[index+len(params.OldString):], true
+}
+
+func diffContent(path, oldText, newText string, existed bool) ToolCallContent {
+	c := ToolCallContent{
+		Type:    "diff",
+		Path:    path,
+		NewText: newText,
+	}
+	if existed {
+		old := oldText
+		c.OldText = &old
+	}
+	return c
+}
+
+func toolLocations(paths ...string) []ToolCallLocation {
+	out := make([]ToolCallLocation, 0, len(paths))
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		out = append(out, ToolCallLocation{Path: path})
+	}
+	return out
 }
 
 func usageUpdate(usage engine.Usage) *UsageUpdate {

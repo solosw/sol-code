@@ -95,7 +95,7 @@ func (t *multiWriteTool) Invoke(ctx context.Context, uctx *UseContext, input jso
 			return ErrorResult(fmt.Sprintf("files[%d]: duplicate file_path %s", index, write.FilePath)), nil
 		}
 		seen[path] = struct{}{}
-		data, err := os.ReadFile(path)
+		data, err := ReadTextFileContent(ctx, uctx, path)
 		existed := err == nil
 		if err != nil && !os.IsNotExist(err) {
 			return ErrorResult(fmt.Sprintf("files[%d]: read %s: %v", index, path, err)), nil
@@ -104,7 +104,7 @@ func (t *multiWriteTool) Invoke(ctx context.Context, uctx *UseContext, input jso
 		files = append(files, &stagedEditFile{path: path, before: string(data), after: write.Content, existed: existed, descs: []string{desc}})
 	}
 
-	if err := commitStagedEdits(files); err != nil {
+	if err := commitStagedEdits(ctx, uctx, files); err != nil {
 		return ErrorResult(err.Error()), nil
 	}
 

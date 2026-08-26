@@ -83,6 +83,28 @@ func (v *viewTool) Invoke(ctx context.Context, uctx *UseContext, input json.RawM
 		return ErrorResult(err.Error()), nil
 	}
 
+	if params.Limit <= 0 {
+		params.Limit = DefaultReadLimit
+	}
+
+	if IsImagePath(filePath) {
+		ext := strings.ToLower(filepath.Ext(filePath))
+		return ErrorResult(fmt.Sprintf("This is an image file of type: %s. Use the ViewImage tool to examine images.", ext)), nil
+	}
+
+	// ACP clients can expose unsaved editor buffers. Prefer that source whenever
+	// the session advertised readTextFile instead of requiring a local stat.
+	if uctx != nil && uctx.TextFileSystem != nil && uctx.TextFileSystem.CanReadTextFile() {
+		data, err := ReadTextFileContent(ctx, uctx, filePath)
+		if err != nil {
+			return ErrorResult(fmt.Sprintf("error reading file: %v", err)), nil
+		}
+		if len(data) > MaxReadSize {
+			return ErrorResult(fmt.Sprintf("File is too large (%d bytes). Maximum size is %d bytes", len(data), MaxReadSize)), nil
+		}
+		return Result(formatViewedText(string(data), params.Offset, params.Limit)), nil
+	}
+
 	fileInfo, err := os.Stat(filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -126,6 +148,32 @@ func (v *viewTool) Invoke(ctx context.Context, uctx *UseContext, input json.RawM
 	output.WriteString("\n</file>")
 
 	return Result(output.String()), nil
+}
+
+func formatViewedText(content string, offset, limit int) string {
+	lines := strings.Split(content, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(lines) {
+		offset = len(lines)
+	}
+	end := offset + limit
+	if end > len(lines) {
+		end = len(lines)
+	}
+	visible := strings.Join(lines[offset:end], "\n")
+	var output strings.Builder
+	output.WriteString("<file>\n")
+	output.WriteString(AddLineNumbers(visible, offset+1))
+	if remaining := len(lines) - end; remaining > 0 {
+		output.WriteString(fmt.Sprintf("\n\n(File has %d more lines. Use 'offset' parameter to read beyond line %d)", remaining, end))
+	}
+	output.WriteString("\n</file>")
+	return output.String()
 }
 
 // ReadTextFile reads a file from offset for up to limit lines.

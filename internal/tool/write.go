@@ -104,7 +104,7 @@ func (w *writeTool) Invoke(ctx context.Context, uctx *UseContext, input json.Raw
 
 	// Read old content for diff
 	var oldContent string
-	if oldBytes, err := os.ReadFile(filePath); err == nil {
+	if oldBytes, err := ReadTextFileContent(ctx, uctx, filePath); err == nil {
 		oldContent = string(oldBytes)
 	}
 
@@ -119,7 +119,7 @@ func (w *writeTool) Invoke(ctx context.Context, uctx *UseContext, input json.Raw
 	}
 
 	// Write the file
-	if err := os.WriteFile(filePath, []byte(params.Content), 0o644); err != nil {
+	if err := WriteTextFileContent(ctx, uctx, filePath, params.Content); err != nil {
 		return ErrorResult(fmt.Sprintf("error writing file: %v", err)), nil
 	}
 	recordFileChange(ctx, uctx, WriteToolName, filePath, desc, oldContent, params.Content)

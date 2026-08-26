@@ -579,7 +579,7 @@ func (s *Server) emitPlanUpdate(sess *acpSession, input json.RawMessage) {
 	if allCompleted {
 		entries = []PlanEntry{}
 	}
-	s.emitUpdate(sess.id, SessionUpdate{SessionUpdate: "agent_plan_update", PlanEntries: entries})
+	s.emitUpdate(sess.id, SessionUpdate{SessionUpdate: "plan", PlanEntries: entries})
 }
 
 func (s *Server) requestPermission(sess *acpSession, toolName, description string) bool {

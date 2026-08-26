@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/solosw/solcode/internal/permission"
 	"github.com/solosw/solcode/internal/tool"
 )
 
@@ -25,12 +26,36 @@ func (s *Server) textFileSystem(sessionID string, capabilities FSClientCapabilit
 	return &clientTextFileSystem{server: s, sessionID: sessionID, capabilities: capabilities}
 }
 
+func (f *clientTextFileSystem) sessionMode() permission.Mode {
+	if f == nil || f.server == nil {
+		return permission.ModeAuto
+	}
+	sess := f.server.getSession(f.sessionID)
+	if sess == nil || sess.application == nil || sess.application.Permissions == nil {
+		return permission.ModeAuto
+	}
+	return sess.application.Permissions.Mode()
+}
+
+// clientWriteEnabled reports whether writes should go through the client FS.
+// Bypass/Goal already skip agent-side permission prompts; routing writes through
+// fs/write_text_file would still let many clients show a second accept dialog.
+// Falling back to local disk keeps bypass/goal prompt-free.
+func (f *clientTextFileSystem) clientWriteEnabled() bool {
+	switch f.sessionMode() {
+	case permission.ModeBypass, permission.ModeGoal:
+		return false
+	default:
+		return true
+	}
+}
+
 func (f *clientTextFileSystem) CanReadTextFile() bool {
 	return f != nil && f.capabilities.ReadTextFile
 }
 
 func (f *clientTextFileSystem) CanWriteTextFile() bool {
-	return f != nil && f.capabilities.WriteTextFile
+	return f != nil && f.capabilities.WriteTextFile && f.clientWriteEnabled()
 }
 
 func (f *clientTextFileSystem) ReadTextFile(ctx context.Context, path string) (string, error) {

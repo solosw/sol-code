@@ -21,7 +21,7 @@ func TestAgentPlanUpdateMarshalsTodoWriteEntries(t *testing.T) {
 	for _, todo := range params.Todos {
 		entries = append(entries, PlanEntry{Content: todo.Content, Priority: todo.Priority, Status: todo.Status})
 	}
-	raw, err := json.Marshal(SessionUpdate{SessionUpdate: "agent_plan_update", PlanEntries: entries})
+	raw, err := json.Marshal(SessionUpdate{SessionUpdate: "plan", PlanEntries: entries})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestAgentPlanUpdateMarshalsTodoWriteEntries(t *testing.T) {
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.SessionUpdate != "agent_plan_update" || len(payload.Entries) != 2 {
+	if payload.SessionUpdate != "plan" || len(payload.Entries) != 2 {
 		t.Fatalf("payload = %s", raw)
 	}
 	if payload.Entries[1] != (PlanEntry{Content: "Implement filesystem", Priority: "medium", Status: "in_progress"}) {
@@ -64,7 +64,7 @@ func TestEmitPlanUpdateMapsTodoWrite(t *testing.T) {
 	if err := decodeParams(message.Params, &params); err != nil {
 		t.Fatal(err)
 	}
-	if params.SessionID != sess.id || params.Update.SessionUpdate != "agent_plan_update" {
+	if params.SessionID != sess.id || params.Update.SessionUpdate != "plan" {
 		t.Fatalf("update = %+v", params)
 	}
 	if len(params.Update.PlanEntries) != 2 || params.Update.PlanEntries[1].Status != "in_progress" {

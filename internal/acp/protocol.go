@@ -317,7 +317,7 @@ func (u SessionUpdate) MarshalJSON() ([]byte, error) {
 	if len(u.Locations) > 0 {
 		payload["locations"] = u.Locations
 	}
-	if len(u.PlanEntries) > 0 || u.SessionUpdate == "agent_plan_update" {
+	if len(u.PlanEntries) > 0 || u.SessionUpdate == "plan" || u.SessionUpdate == "agent_plan_update" {
 		payload["entries"] = u.PlanEntries
 	}
 	if len(u.AvailableCommands) > 0 || u.SessionUpdate == "available_commands_update" {

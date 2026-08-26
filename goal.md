@@ -32,7 +32,7 @@ ACP p0+p1+p2: Agent Client Protocol stdio server so editors can drive the same a
 
 ## P4 — ACP plan updates and client filesystem
 
-- [x] Map successful TodoWrite calls to complete `agent_plan_update` entries.
+- [x] Map successful TodoWrite calls to complete `plan` entries.
 - [x] Add per-session, capability-gated `fs/read_text_file` / `fs/write_text_file` client filesystem access.
 - [x] Route text file tools through the client filesystem when the matching capability is advertised, with local fallback otherwise.
 

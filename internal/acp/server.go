@@ -465,6 +465,9 @@ func (s *Server) replayPersistedHistory(ctx context.Context, sess *acpSession, r
 	for _, update := range sessionHistoryUpdates(loaded) {
 		s.emitUpdate(sess.id, update)
 	}
+	if u := sessionUsageUpdate(ctx, sess.application, loaded, sess.cfg.MaxContextTokens); u != nil {
+		s.emitUpdate(sess.id, SessionUpdate{SessionUpdate: "usage_update", Usage: u})
+	}
 	return nil
 }
 
@@ -481,6 +484,38 @@ func (s *Server) emitSessionBootstrap(sess *acpSession) {
 			SessionUpdate: "current_mode_update",
 			CurrentModeID: string(sess.application.Permissions.Mode()),
 		})
+	}
+	// Publish TUI-aligned context occupancy (used=estimate, size=cfg limit).
+	s.emitSessionUsage(context.Background(), sess)
+}
+
+// emitSessionUsage sends usage_update using the same occupancy numbers as the TUI footer.
+func (s *Server) emitSessionUsage(ctx context.Context, sess *acpSession) {
+	if s == nil || sess == nil || sess.application == nil {
+		return
+	}
+	var current *session.Session
+	if sess.application.Sessions != nil {
+		if loaded, err := sess.application.Sessions.Load(ctx, session.SessionID(sess.persistID())); err == nil {
+			current = loaded
+		}
+	}
+	maxCtx := int64(0)
+	if sess.cfg.MaxContextTokens > 0 {
+		maxCtx = sess.cfg.MaxContextTokens
+	} else {
+		maxCtx = sess.application.Config.MaxContextTokens
+	}
+	if current == nil {
+		// Empty session: still report the window size so clients can render the meter.
+		s.emitUpdate(sess.id, SessionUpdate{
+			SessionUpdate: "usage_update",
+			Usage:         usageUpdateFromSession(0, maxCtx),
+		})
+		return
+	}
+	if u := sessionUsageUpdate(ctx, sess.application, current, maxCtx); u != nil {
+		s.emitUpdate(sess.id, SessionUpdate{SessionUpdate: "usage_update", Usage: u})
 	}
 }
 

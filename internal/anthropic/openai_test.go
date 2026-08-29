@@ -121,8 +121,9 @@ func TestBuildOpenAIRequestMapsSystemToolsAndHistory(t *testing.T) {
 				InputSchema: sdk.ToolInputSchemaParam{Properties: map[string]any{"command": map[string]any{"type": "string"}}, Required: []string{"command"}},
 			}},
 		},
-		Thinking: true,
-		Effort:   "high",
+		Thinking:     true,
+		ThinkingText: true,
+		Effort:       "high",
 	}
 	body, err := buildOpenAIRequest(req)
 	if err != nil {
@@ -155,6 +156,9 @@ func TestBuildOpenAIRequestMapsSystemToolsAndHistory(t *testing.T) {
 	}
 	if body.Thinking == nil || body.Thinking.Type != "adaptive" {
 		t.Fatalf("thinking = %#v", body.Thinking)
+	}
+	if body.Thinking.Display != "summarized" {
+		t.Fatalf("thinking.display = %q, want summarized", body.Thinking.Display)
 	}
 	if body.ReasoningEffort != "high" {
 		t.Fatalf("effort = %q", body.ReasoningEffort)
@@ -239,8 +243,8 @@ func TestOpenAIClientCreateStream(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		chunks := []string{
-			`{"choices":[{"delta":{"content":"Hel"}}]}`,
-			`{"choices":[{"delta":{"content":"lo"},"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":12}}}`,
+			`{"choices":[{"delta":{"reasoning_content":"plan "}}]}`,
+			`{"choices":[{"delta":{"reasoning":"step","content":"Hello"},"finish_reason":"stop"}],"usage":{"prompt_tokens":20,"completion_tokens":2,"prompt_tokens_details":{"cached_tokens":12}}}`,
 		}
 		for _, c := range chunks {
 			_, _ = w.Write([]byte("data: " + c + "\n\n"))
@@ -249,23 +253,38 @@ func TestOpenAIClientCreateStream(t *testing.T) {
 	}))
 	defer server.Close()
 
-	var got strings.Builder
+	var got, gotThinking strings.Builder
 	client := NewClient(Options{BaseURL: server.URL, Format: "openai"})
 	msg, err := client.Create(t.Context(), MessageRequest{
-		Model:       "m",
-		MaxTokens:   16,
-		Messages:    []sdk.MessageParam{sdk.NewUserMessage(sdk.NewTextBlock("hi"))},
-		Stream:      true,
-		OnTextDelta: func(s string) { got.WriteString(s) },
+		Model:           "m",
+		MaxTokens:       16,
+		Messages:        []sdk.MessageParam{sdk.NewUserMessage(sdk.NewTextBlock("hi"))},
+		Thinking:        true,
+		ThinkingText:    true,
+		Stream:          true,
+		OnTextDelta:     func(s string) { got.WriteString(s) },
+		OnThinkingDelta: func(s string) { gotThinking.WriteString(s) },
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.String() != "Hello" {
-		t.Fatalf("deltas = %q", got.String())
+		t.Fatalf("text deltas = %q", got.String())
+	}
+	if gotThinking.String() != "plan step" {
+		t.Fatalf("thinking deltas = %q", gotThinking.String())
 	}
 	if TextFromMessage(msg) != "Hello" {
 		t.Fatalf("text = %q", TextFromMessage(msg))
+	}
+	var thought string
+	for _, block := range msg.Content {
+		if block.Type == "thinking" {
+			thought = block.Thinking
+		}
+	}
+	if thought != "plan step" {
+		t.Fatalf("thinking content = %q", thought)
 	}
 	if msg.Usage.CacheReadInputTokens != 12 {
 		t.Fatalf("cache read = %d", msg.Usage.CacheReadInputTokens)

@@ -330,7 +330,14 @@ func (u SessionUpdate) MarshalJSON() ([]byte, error) {
 		payload["message"] = u.Message
 	}
 	if u.Usage != nil {
-		payload["usage"] = u.Usage
+		// claude-agent-acp flattens used/size/cost onto the update object.
+		payload["used"] = u.Usage.Used
+		if u.Usage.Size > 0 {
+			payload["size"] = u.Usage.Size
+		}
+		if u.Usage.Cost != nil {
+			payload["cost"] = u.Usage.Cost
+		}
 	}
 	return json.Marshal(payload)
 }
@@ -376,7 +383,37 @@ func (u *SessionUpdate) UnmarshalJSON(data []byte) error {
 	if raw, ok := payload["message"]; ok {
 		_ = json.Unmarshal(raw, &u.Message)
 	}
-	if raw, ok := payload["usage"]; ok {
+	// usage_update fields are flat on the update (claude-agent-acp wire shape).
+	if _, hasUsed := payload["used"]; hasUsed || payloadHasKey(payload, "size") || payloadHasKey(payload, "cost") {
+		usage := UsageUpdate{}
+		if raw, ok := payload["used"]; ok {
+			_ = json.Unmarshal(raw, &usage.Used)
+		}
+		if raw, ok := payload["size"]; ok {
+			// Accept both number (claude-agent-acp) and legacy {current,limit} object.
+			var sizeNum int64
+			if err := json.Unmarshal(raw, &sizeNum); err == nil {
+				usage.Size = sizeNum
+			} else {
+				var legacy struct {
+					Current int64 `json:"current"`
+					Limit   int64 `json:"limit"`
+				}
+				if err := json.Unmarshal(raw, &legacy); err == nil {
+					usage.Used = legacy.Current
+					usage.Size = legacy.Limit
+				}
+			}
+		}
+		if raw, ok := payload["cost"]; ok {
+			var cost UsageCost
+			if err := json.Unmarshal(raw, &cost); err == nil {
+				usage.Cost = &cost
+			}
+		}
+		u.Usage = &usage
+	}
+	if raw, ok := payload["usage"]; ok && u.Usage == nil {
 		var usage UsageUpdate
 		if err := json.Unmarshal(raw, &usage); err == nil {
 			u.Usage = &usage
@@ -393,13 +430,22 @@ func (u *SessionUpdate) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// UsageUpdate mirrors claude-agent-acp usage_update fields.
+// Wire shape (flattened onto the session update, not nested under "usage"):
+//
+//	{ "sessionUpdate": "usage_update", "used": <tokens>, "size": <window>, "cost"?: {amount, currency} }
+//
+// used = context occupancy; size = context window limit.
 type UsageUpdate struct {
-	InputTokens              int64 `json:"inputTokens,omitempty"`
-	OutputTokens             int64 `json:"outputTokens,omitempty"`
-	CacheCreationInputTokens int64 `json:"cacheCreationInputTokens,omitempty"`
-	CacheReadInputTokens     int64 `json:"cacheReadInputTokens,omitempty"`
-	MaxContextTokens         int64 `json:"maxContextTokens,omitempty"`
-	EstimatedContextTokens   int64 `json:"estimatedContextTokens,omitempty"`
+	Used int64      `json:"used"`
+	Size int64      `json:"size,omitempty"`
+	Cost *UsageCost `json:"cost,omitempty"`
+}
+
+// UsageCost is optional USD spend reported by some agents (claude-agent-acp).
+type UsageCost struct {
+	Amount   float64 `json:"amount"`
+	Currency string  `json:"currency"`
 }
 
 type AvailableCommand struct {
@@ -472,6 +518,11 @@ func defaultPermissionOptions() []PermissionOption {
 		{OptionID: PermissionRejectOnce, Name: "Reject once", Kind: "reject_once"},
 		{OptionID: PermissionRejectAlways, Name: "Reject always", Kind: "reject_always"},
 	}
+}
+
+func payloadHasKey(payload map[string]json.RawMessage, key string) bool {
+	_, ok := payload[key]
+	return ok
 }
 
 func availableModes() []SessionMode {

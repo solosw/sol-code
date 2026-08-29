@@ -178,6 +178,14 @@ func sessionHistoryUpdates(s *session.Session) []SessionUpdate {
 				}
 				content := ContentBlock{Type: "text", Text: text}
 				updates = append(updates, SessionUpdate{SessionUpdate: kind, Content: &content})
+			case block.OfThinking != nil:
+				// Match claude-agent-acp: thinking → agent_thought_chunk with content{type:text}.
+				text := strings.TrimSpace(block.OfThinking.Thinking)
+				if text == "" {
+					continue
+				}
+				content := ContentBlock{Type: "text", Text: text}
+				updates = append(updates, SessionUpdate{SessionUpdate: "agent_thought_chunk", Content: &content})
 			case block.OfToolUse != nil:
 				input, _ := json.Marshal(block.OfToolUse.Input)
 				updates = append(updates, SessionUpdate{
@@ -438,13 +446,14 @@ func toolLocations(paths ...string) []ToolCallLocation {
 }
 
 func usageUpdate(usage engine.Usage) *UsageUpdate {
+	// Match the TUI footer "ctx used/limit":
+	//   used  = EstimatedContextTokens (ContextBuilder occupancy)
+	//   size  = MaxContextTokens (cfg.MaxContextTokens)
+	// Do not fall back to cumulative API billing tokens — those are session
+	// spend totals, not current window occupancy, and diverge from the TUI.
 	return &UsageUpdate{
-		InputTokens:              usage.InputTokens,
-		OutputTokens:             usage.OutputTokens,
-		CacheCreationInputTokens: usage.CacheCreationInputTokens,
-		CacheReadInputTokens:     usage.CacheReadInputTokens,
-		MaxContextTokens:         usage.MaxContextTokens,
-		EstimatedContextTokens:   usage.EstimatedContextTokens,
+		Used: usage.EstimatedContextTokens,
+		Size: usage.MaxContextTokens,
 	}
 }
 

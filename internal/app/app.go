@@ -1064,6 +1064,12 @@ func (a *App) memoryRetrievalTokenBudget() int {
 	return budget
 }
 
+// EstimateSessionContextTokens returns the same context occupancy the TUI
+// footer uses for "ctx used" (system+tools+messages via ContextBuilder).
+func (a *App) EstimateSessionContextTokens(ctx context.Context, current *session.Session) int64 {
+	return int64(a.estimateSessionContextTokens(ctx, current))
+}
+
 func (a *App) estimateSessionContextTokens(ctx context.Context, current *session.Session) int {
 	if a == nil || current == nil {
 		return 0

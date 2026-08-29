@@ -6,7 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/solosw/solcode/internal/app"
 	"github.com/solosw/solcode/internal/config"
+	"github.com/solosw/solcode/internal/engine"
 	"github.com/solosw/solcode/internal/session"
 	"github.com/solosw/solcode/internal/skill"
 )
@@ -447,6 +449,9 @@ func (s *Server) slashNewSession(ctx context.Context, sess *acpSession, args, pe
 	for _, update := range sessionHistoryUpdates(loaded) {
 		s.emitUpdate(sess.id, update)
 	}
+	if u := sessionUsageUpdate(ctx, sess.application, loaded, sess.cfg.MaxContextTokens); u != nil {
+		s.emitUpdate(sess.id, SessionUpdate{SessionUpdate: "usage_update", Usage: u})
+	}
 	msg := fmt.Sprintf("Started new session: %s (cross-session memory: %v)", name, crossSessionMemory)
 	if err := config.SaveLocalOverrides(persistencePath, map[string]any{"session": map[string]any{"default_session": name}}); err != nil {
 		msg += fmt.Sprintf("\nWarning: could not persist default session: %v", err)
@@ -486,7 +491,7 @@ func (s *Server) switchDiskSession(ctx context.Context, sess *acpSession, sessio
 	if err := config.SaveLocalOverrides(persistencePath, map[string]any{"session": map[string]any{"default_session": sessionName}}); err != nil {
 		msg += fmt.Sprintf("\nWarning: could not persist default session: %v", err)
 	}
-	if u := usageUpdateFromSession(loaded); u != nil {
+	if u := sessionUsageUpdate(ctx, sess.application, loaded, sess.cfg.MaxContextTokens); u != nil {
 		s.emitUpdate(sess.id, SessionUpdate{SessionUpdate: "usage_update", Usage: u})
 	}
 	return msg, nil
@@ -680,16 +685,25 @@ func cloneMCPServers(servers []config.MCPServerConfig) []config.MCPServerConfig 
 	return out
 }
 
-func usageUpdateFromSession(s *session.Session) *UsageUpdate {
+// usageUpdateFromSession builds a TUI-aligned occupancy update.
+// estimatedContextTokens should come from App.EstimateSessionContextTokens
+// (same path as the TUI ctx meter). maxContextTokens is cfg.MaxContextTokens.
+func usageUpdateFromSession(estimatedContextTokens, maxContextTokens int64) *UsageUpdate {
+	return usageUpdate(engine.Usage{
+		EstimatedContextTokens: estimatedContextTokens,
+		MaxContextTokens:       maxContextTokens,
+	})
+}
+
+func sessionUsageUpdate(ctx context.Context, application *app.App, s *session.Session, maxContextTokens int64) *UsageUpdate {
 	if s == nil {
 		return nil
 	}
-	return &UsageUpdate{
-		InputTokens:              s.Metadata.Usage.InputTokens,
-		OutputTokens:             s.Metadata.Usage.OutputTokens,
-		CacheCreationInputTokens: s.Metadata.Usage.CacheCreationInputTokens,
-		CacheReadInputTokens:     s.Metadata.Usage.CacheReadInputTokens,
+	var estimated int64
+	if application != nil {
+		estimated = application.EstimateSessionContextTokens(ctx, s)
 	}
+	return usageUpdateFromSession(estimated, maxContextTokens)
 }
 
 func stopReasonFromErr(ctx context.Context, err error) string {

@@ -34,15 +34,19 @@ type openAIStreamOpts struct {
 }
 
 type openAIThinking struct {
-	Type string `json:"type"`
+	Type    string `json:"type"`
+	Display string `json:"display,omitempty"`
 }
 
 type openAIChatMessage struct {
-	Role       string           `json:"role"`
-	Content    any              `json:"content,omitempty"` // string | []openAIContentPart
-	Name       string           `json:"name,omitempty"`
-	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string           `json:"tool_call_id,omitempty"`
+	Role             string           `json:"role"`
+	Content          any              `json:"content,omitempty"` // string | []openAIContentPart
+	ReasoningContent any              `json:"reasoning_content,omitempty"`
+	Reasoning        any              `json:"reasoning,omitempty"`
+	Thinking         any              `json:"thinking,omitempty"`
+	Name             string           `json:"name,omitempty"`
+	ToolCalls        []openAIToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string           `json:"tool_call_id,omitempty"`
 }
 
 type openAIContentPart struct {
@@ -237,6 +241,9 @@ func buildOpenAIRequest(req MessageRequest) (openAIChatRequest, error) {
 	}
 	if req.Thinking {
 		out.Thinking = &openAIThinking{Type: "adaptive"}
+		if req.ThinkingText {
+			out.Thinking.Display = "summarized"
+		}
 	}
 	return out, nil
 }
@@ -565,6 +572,12 @@ func (c *Client) consumeOpenAIStream(r io.Reader, req MessageRequest) (*sdk.Mess
 				req.OnTextDelta(s)
 			}
 		}
+		if s := reasoningContentAsString(delta); s != "" {
+			thinking.WriteString(s)
+			if req.OnThinkingDelta != nil {
+				req.OnThinkingDelta(s)
+			}
+		}
 		// Some gateways stream reasoning under alternate keys; ignore if absent.
 		if len(delta.ToolCalls) > 0 {
 			for _, tc := range delta.ToolCalls {
@@ -599,8 +612,9 @@ func (c *Client) consumeOpenAIStream(r io.Reader, req MessageRequest) (*sdk.Mess
 
 	// Build a synthetic non-stream choice for the shared mapper.
 	msg := openAIChatMessage{
-		Role:    "assistant",
-		Content: text.String(),
+		Role:             "assistant",
+		Content:          text.String(),
+		ReasoningContent: thinking.String(),
 	}
 	if len(toolOrder) > 0 {
 		msg.ToolCalls = make([]openAIToolCall, 0, len(toolOrder))
@@ -610,12 +624,19 @@ func (c *Client) consumeOpenAIStream(r io.Reader, req MessageRequest) (*sdk.Mess
 			}
 		}
 	}
-	// thinking currently unused in OpenAI mapping; keep builder for future gateways.
-	_ = thinking
 	return openAIChoiceToMessage(openAIChatChoice{
 		Message:      msg,
 		FinishReason: finishReason,
 	}, model, usage), nil
+}
+
+func reasoningContentAsString(message openAIChatMessage) string {
+	for _, value := range []any{message.ReasoningContent, message.Reasoning, message.Thinking} {
+		if text := contentAsString(value); text != "" {
+			return text
+		}
+	}
+	return ""
 }
 
 func contentAsString(content any) string {
@@ -662,7 +683,15 @@ func openAIChoiceToMessage(choice openAIChatChoice, model string, usage *openAIU
 	msg := choice.Message
 	// Some providers only fill delta in stream final; prefer message.
 	text := contentAsString(msg.Content)
-	content := make([]sdk.ContentBlockUnion, 0, 1+len(msg.ToolCalls))
+	thinking := reasoningContentAsString(msg)
+	content := make([]sdk.ContentBlockUnion, 0, 2+len(msg.ToolCalls))
+	if thinking != "" {
+		content = append(content, mustContentBlock(map[string]any{
+			"type":      "thinking",
+			"thinking":  thinking,
+			"signature": "",
+		}))
+	}
 	if text != "" {
 		content = append(content, mustContentBlock(map[string]any{
 			"type": "text",

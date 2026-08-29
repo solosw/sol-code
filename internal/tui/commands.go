@@ -40,6 +40,7 @@ func slashHelpText() string {
 	return strings.Join([]string{
 		"Available commands:",
 		"/help — show this help",
+		"/status — show model, context, and cache usage",
 		"/clear — clear the current TUI transcript",
 		"/model — select a model from the current provider",
 		"/provider — select a provider via dialog",
@@ -94,6 +95,8 @@ func (m *Model) handleSlashCommand(input string) (bool, tea.Cmd) {
 	switch cmd.Name {
 	case "help":
 		m.appendCommandResult(slashHelpText())
+	case "status":
+		m.appendCommandResult(m.slashStatusText())
 	case "clear":
 		m.messages = []ChatMessage{m.systemMessage("Conversation cleared. Type /help for commands.")}
 		m.resetSessionTokenTotals()
@@ -218,6 +221,45 @@ func (m *Model) handleSlashCommand(input string) (bool, tea.Cmd) {
 	return true, nil
 }
 
+func (m *Model) slashStatusText() string {
+	usage := m.tokenUsage
+	used := m.displayContextTokens()
+	limit := m.currentContextLimit()
+	inputSide := usageInputSideTotal(usage.InputTokens, usage.CacheReadInputTokens, usage.CacheCreationInputTokens)
+	cacheRead := max64(0, usage.CacheReadInputTokens)
+	cacheWrite := max64(0, usage.CacheCreationInputTokens)
+	cacheUsed := cacheRead + cacheWrite
+	outTokens := max64(0, usage.OutputTokens)
+
+	modelName := strings.TrimSpace(m.currentModelName())
+	if modelName == "" {
+		modelName = "solcode"
+	}
+
+	lines := []string{
+		fmt.Sprintf("Model: %s", modelName),
+	}
+	if mode := strings.TrimSpace(m.permissionMode); mode != "" {
+		lines = append(lines, fmt.Sprintf("Mode: %s", mode))
+	}
+	if cwd := strings.TrimSpace(m.cwd); cwd != "" {
+		lines = append(lines, fmt.Sprintf("Workdir: %s", cwd))
+	}
+	lines = append(lines,
+		fmt.Sprintf("Context: %s / %s (%s)", compactTokens(used), renderContextLimit(limit), tokenSharePercent(used, limit)),
+		fmt.Sprintf("Cache: %s / %s input-side (%s) — read %s, write %s",
+			compactTokens(cacheUsed),
+			compactTokens(inputSide),
+			tokenSharePercent(cacheUsed, inputSide),
+			compactTokens(cacheRead),
+			compactTokens(cacheWrite),
+		),
+		fmt.Sprintf("Output: %s (session total)", compactTokens(outTokens)),
+		fmt.Sprintf("Input: %s uncached (session total)", compactTokens(max64(0, usage.InputTokens))),
+	)
+	return strings.Join(lines, "\n")
+}
+
 func (m *Model) isSkillName(name string) bool {
 	if m.skillNamesFn == nil {
 		return false
@@ -310,6 +352,7 @@ func (m *Model) slashSkillPrompt(input string) (string, bool) {
 
 var builtinCommands = map[string]bool{
 	"help":          true,
+	"status":        true,
 	"clear":         true,
 	"model":         true,
 	"provider":      true,

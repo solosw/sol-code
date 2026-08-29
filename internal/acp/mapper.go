@@ -460,6 +460,7 @@ func usageUpdate(usage engine.Usage) *UsageUpdate {
 func availableCommands() []AvailableCommand {
 	return []AvailableCommand{
 		{Name: "help", Description: "Show available commands"},
+		{Name: "status", Description: "Show model, context, and cache usage"},
 		{Name: "model", Description: "Select a model from the current provider"},
 		{Name: "provider", Description: "Select a provider"},
 		{Name: "effort", Description: "Select thinking effort"},

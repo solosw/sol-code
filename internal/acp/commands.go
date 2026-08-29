@@ -40,6 +40,7 @@ func slashHelpText() string {
 	return strings.Join([]string{
 		"Available commands:",
 		"/help — show this help",
+		"/status — show model, context, and cache usage",
 		"/model — select a model from the current provider",
 		"/provider — select a provider",
 		"/effort — select thinking effort",
@@ -80,6 +81,13 @@ func (s *Server) handleSlashCommand(ctx context.Context, sess *acpSession, input
 	switch cmd.Name {
 	case "help":
 		s.emitText(sess, "agent_message_chunk", slashHelpText())
+		return true, StopReasonEndTurn, nil
+	case "status":
+		msg, err := s.slashStatus(ctx, sess)
+		if err != nil {
+			return true, stopReasonFromErr(ctx, err), errIfNotCancel(ctx, err)
+		}
+		s.emitText(sess, "agent_message_chunk", msg)
 		return true, StopReasonEndTurn, nil
 	case "clear":
 		s.emitText(sess, "agent_message_chunk", "Transcript clear is handled by the client UI in ACP mode.")
@@ -175,7 +183,7 @@ func (s *Server) handleSlashCommand(ctx context.Context, sess *acpSession, input
 
 func isBuiltinSlashCommand(name string) bool {
 	switch name {
-	case "help", "clear", "model", "provider", "effort", "sessions", "compact",
+	case "help", "status", "clear", "model", "provider", "effort", "sessions", "compact",
 		"fix-session", "new-session", "skills", "mcp", "goal", "workflows",
 		"workflow", "workflow-edit", "web-ui":
 		return true
@@ -381,6 +389,132 @@ func (s *Server) slashCompact(ctx context.Context, sess *acpSession) (string, er
 		return "Compact skipped: current session is below the compaction threshold.", nil
 	}
 	return "Compacted current session.", nil
+}
+
+func (s *Server) slashStatus(ctx context.Context, sess *acpSession) (string, error) {
+	if sess == nil || sess.application == nil {
+		return "Session is not ready.", nil
+	}
+
+	modelName := strings.TrimSpace(sess.cfg.Model)
+	if modelName == "" {
+		modelName = "solcode"
+	}
+	provider := strings.TrimSpace(sess.cfg.Provider)
+	effort := strings.TrimSpace(sess.cfg.Effort)
+	sessionName := strings.TrimSpace(sess.persistID())
+	workDir := strings.TrimSpace(sess.workDir)
+
+	var (
+		estimated int64
+		input     int64
+		output    int64
+		cacheW    int64
+		cacheR    int64
+	)
+	maxCtx := sess.cfg.MaxContextTokens
+	if sess.application.Sessions != nil && sessionName != "" {
+		if loaded, err := sess.application.Sessions.Load(ctx, session.SessionID(sessionName)); err == nil && loaded != nil {
+			estimated = sess.application.EstimateSessionContextTokens(ctx, loaded)
+			input = loaded.Metadata.Usage.InputTokens
+			output = loaded.Metadata.Usage.OutputTokens
+			cacheW = loaded.Metadata.Usage.CacheCreationInputTokens
+			cacheR = loaded.Metadata.Usage.CacheReadInputTokens
+		}
+	}
+
+	inputSide := statusInputSideTotal(input, cacheR, cacheW)
+	cacheUsed := maxInt64(0, cacheR) + maxInt64(0, cacheW)
+
+	lines := []string{
+		fmt.Sprintf("Model: %s", modelName),
+	}
+	if provider != "" {
+		lines = append(lines, fmt.Sprintf("Provider: %s", provider))
+	}
+	if effort != "" {
+		lines = append(lines, fmt.Sprintf("Effort: %s", effort))
+	}
+	if sessionName != "" {
+		lines = append(lines, fmt.Sprintf("Session: %s", sessionName))
+	}
+	if workDir != "" {
+		lines = append(lines, fmt.Sprintf("Workdir: %s", workDir))
+	}
+	lines = append(lines,
+		fmt.Sprintf("Context: %s / %s (%s)", compactStatusTokens(estimated), renderStatusLimit(maxCtx), statusSharePercent(estimated, maxCtx)),
+		fmt.Sprintf("Cache: %s / %s input-side (%s) — read %s, write %s",
+			compactStatusTokens(cacheUsed),
+			compactStatusTokens(inputSide),
+			statusSharePercent(cacheUsed, inputSide),
+			compactStatusTokens(maxInt64(0, cacheR)),
+			compactStatusTokens(maxInt64(0, cacheW)),
+		),
+		fmt.Sprintf("Output: %s (session total)", compactStatusTokens(maxInt64(0, output))),
+		fmt.Sprintf("Input: %s uncached (session total)", compactStatusTokens(maxInt64(0, input))),
+	)
+	return strings.Join(lines, "\n"), nil
+}
+
+func statusInputSideTotal(inputTokens, cacheRead, cacheWrite int64) int64 {
+	total := int64(0)
+	if inputTokens > 0 {
+		total += inputTokens
+	}
+	if cacheRead > 0 {
+		total += cacheRead
+	}
+	if cacheWrite > 0 {
+		total += cacheWrite
+	}
+	return total
+}
+
+func statusSharePercent(part, total int64) string {
+	if part < 0 {
+		part = 0
+	}
+	if total <= 0 {
+		return "0%"
+	}
+	percent := part * 100 / total
+	if percent < 0 {
+		percent = 0
+	}
+	if percent > 100 {
+		percent = 100
+	}
+	return fmt.Sprintf("%d%%", percent)
+}
+
+func compactStatusTokens(value int64) string {
+	if value >= 1_000_000 {
+		if value%1_000_000 == 0 {
+			return fmt.Sprintf("%dM", value/1_000_000)
+		}
+		return fmt.Sprintf("%.1fM", float64(value)/1_000_000)
+	}
+	if value >= 1_000 {
+		if value%1_000 == 0 {
+			return fmt.Sprintf("%dk", value/1_000)
+		}
+		return fmt.Sprintf("%.1fk", float64(value)/1_000)
+	}
+	return fmt.Sprintf("%d", value)
+}
+
+func renderStatusLimit(value int64) string {
+	if value <= 0 {
+		return "?"
+	}
+	return compactStatusTokens(value)
+}
+
+func maxInt64(a, b int64) int64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func (s *Server) slashFixSession(ctx context.Context, sess *acpSession) (string, error) {

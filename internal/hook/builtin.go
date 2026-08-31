@@ -18,19 +18,18 @@ const (
 
 // CompressToolResultOptions controls the PostToolUse headroom compressor.
 type CompressToolResultOptions struct {
-	// MinTokens skips compression for smaller payloads (default 800).
-	MinTokens int
 	// Aggressiveness is headroom strength 0..1 (default 0.5).
 	Aggressiveness float64
-	// SkipTools are tool names that must keep full results (Edit/Write/…).
+	// SkipTools are tool names that must keep full results.
+	// Empty by default: Edit/Write/Diff and MCP tools are compressed too.
+	// View uses a separate structure-preserving path (not headroom fold).
 	SkipTools []string
 }
 
 func defaultCompressOptions() CompressToolResultOptions {
 	return CompressToolResultOptions{
-		MinTokens:      800,
 		Aggressiveness: 0.5,
-		SkipTools:      []string{"Edit", "MultiEdit", "Write", "MultiWrite", "Patch", "Diff"},
+		SkipTools:      nil,
 	}
 }
 
@@ -91,30 +90,27 @@ func compressToolResultHook(event Event, opts CompressToolResultOptions) (Result
 		return Result{Decision: DecisionAllow}, nil
 	}
 
-	minTokens := opts.MinTokens
-	if minTokens <= 0 {
-		minTokens = 800
-	}
 	origTokens := tokenest.Text(block.Text)
-	if origTokens < minTokens {
-		return Result{Decision: DecisionAllow}, nil
+	var (
+		compressed string
+		err        error
+	)
+	if isStructurePreservingCompressTool(event.ToolName) {
+		// View (and similar read tools): never fold away middle lines with
+		// headroom's "[...N more lines...]". Only trim pathological line length
+		// and collapse runs of blank lines so the model still sees the code.
+		compressed = compressViewStructuredText(block.Text)
+	} else {
+		compressed, err = compressTextLegacy(block.Text, opts.Aggressiveness)
+		if err != nil {
+			return Result{Decision: DecisionAllow}, err
+		}
+		compressed = strings.TrimSpace(compressed)
 	}
-
-	compressed, err := compressTextLegacy(block.Text, opts.Aggressiveness)
-	if err != nil {
-		return Result{Decision: DecisionAllow}, err
-	}
-	compressed = strings.TrimSpace(compressed)
 	if compressed == "" {
 		return Result{Decision: DecisionAllow}, nil
 	}
-	compTokens := tokenest.Text(compressed)
-	// Only apply when we actually save a meaningful amount (≥15% and ≥100 tokens).
-	if compTokens >= origTokens || origTokens-compTokens < 100 {
-		return Result{Decision: DecisionAllow}, nil
-	}
-	savedPct := float64(origTokens-compTokens) / float64(origTokens)
-	if savedPct < 0.15 {
+	if compressed == block.Text {
 		return Result{Decision: DecisionAllow}, nil
 	}
 
@@ -122,14 +118,118 @@ func compressToolResultHook(event Event, opts CompressToolResultOptions) (Result
 	if out.Type == "" {
 		out.Type = "text"
 	}
-	// Do not inject a human-visible banner into tool_result text; savings are
+	// Do not inject a human-visible banner into tool_result text; token delta is
 	// recorded only on the hook message for diagnostics.
 	out.Text = compressed
+	compTokens := tokenest.Text(compressed)
 	return Result{
 		Decision:       DecisionModify,
 		ModifiedResult: &out,
 		Message:        fmt.Sprintf("compressed %s tool result ~%d→%d tokens", event.ToolName, origTokens, compTokens),
 	}, nil
+}
+
+// viewMaxCompressLine caps single-line bloat in View-shaped tool results.
+// Matches tool.MaxLineLength so PostToolUse does not invent a second policy.
+const viewMaxCompressLine = 2000
+
+func isStructurePreservingCompressTool(name string) bool {
+	switch strings.TrimSpace(name) {
+	case "View":
+		return true
+	default:
+		return false
+	}
+}
+
+// compressViewStructuredText keeps every source line visible. It only:
+//   - truncates individual lines longer than viewMaxCompressLine
+//   - collapses consecutive blank lines (including View "N|" empty rows) to one
+//
+// It must never emit headroom-style structural elision such as
+// "[...N more lines...]".
+func compressViewStructuredText(text string) string {
+	if text == "" {
+		return text
+	}
+	// Preserve whether the original ended with a trailing newline.
+	endsWithNL := strings.HasSuffix(text, "\n")
+	// Normalize CRLF so blank-line detection is stable; View emits "\n".
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	rawLines := strings.Split(text, "\n")
+	// Split keeps a trailing empty element when text ends with "\n"; drop it and
+	// re-apply endsWithNL at the end so we don't invent an extra blank line.
+	if endsWithNL && len(rawLines) > 0 && rawLines[len(rawLines)-1] == "" {
+		rawLines = rawLines[:len(rawLines)-1]
+	}
+
+	out := make([]string, 0, len(rawLines))
+	prevBlank := false
+	for _, line := range rawLines {
+		line = truncateViewCompressLine(line)
+		blank := isViewCompressBlankLine(line)
+		if blank {
+			if prevBlank {
+				continue
+			}
+			prevBlank = true
+		} else {
+			prevBlank = false
+		}
+		out = append(out, line)
+	}
+	result := strings.Join(out, "\n")
+	if endsWithNL {
+		result += "\n"
+	}
+	return result
+}
+
+func truncateViewCompressLine(line string) string {
+	// Prefer truncating the content after a View line-number prefix so the
+	// "N|" marker stays intact for the model.
+	if prefix, content, ok := splitViewNumberedLine(line); ok {
+		if len(content) <= viewMaxCompressLine {
+			return line
+		}
+		return prefix + content[:viewMaxCompressLine] + "... [truncated]"
+	}
+	if len(line) <= viewMaxCompressLine {
+		return line
+	}
+	return line[:viewMaxCompressLine] + "... [truncated]"
+}
+
+// isViewCompressBlankLine reports lines that carry no source text. Plain empty
+// rows and View-numbered empty rows ("     12|") both count so blank runs in
+// real View output can collapse.
+func isViewCompressBlankLine(line string) bool {
+	if strings.TrimSpace(line) == "" {
+		return true
+	}
+	if _, content, ok := splitViewNumberedLine(line); ok {
+		return strings.TrimSpace(content) == ""
+	}
+	return false
+}
+
+// splitViewNumberedLine parses "   12|rest" View rows. ok is false when the
+// line is not in that shape (e.g. "<file>" wrappers).
+func splitViewNumberedLine(line string) (prefix, content string, ok bool) {
+	// Match optional leading spaces, digits, then '|'.
+	i := 0
+	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+		i++
+	}
+	j := i
+	for j < len(line) && line[j] >= '0' && line[j] <= '9' {
+		j++
+	}
+	if j == i || j >= len(line) || line[j] != '|' {
+		return "", "", false
+	}
+	return line[:j+1], line[j+1:], true
 }
 
 func compressTextLegacy(text string, aggressiveness float64) (string, error) {

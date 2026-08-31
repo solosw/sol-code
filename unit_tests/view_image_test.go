@@ -23,7 +23,7 @@ func TestViewImageTool_OptimizesAndReturnsImageBlock(t *testing.T) {
 	writeSolidPNG(t, path, ow, oh)
 
 	vt := tool.NewViewImageTool()
-	input, _ := json.Marshal(map[string]string{"file_path": path})
+	input, _ := json.Marshal(map[string]string{"path": path})
 	block, err := vt.Invoke(context.Background(), &tool.UseContext{WorkDir: dir}, input)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +70,7 @@ func TestViewImageTool_OptimizesAndReturnsImageBlock(t *testing.T) {
 
 func TestViewImageTool_MissingFile(t *testing.T) {
 	vt := tool.NewViewImageTool()
-	input, _ := json.Marshal(map[string]string{"file_path": filepath.Join(t.TempDir(), "nope.png")})
+	input, _ := json.Marshal(map[string]string{"path": filepath.Join(t.TempDir(), "nope.png")})
 	block, err := vt.Invoke(context.Background(), nil, input)
 	if err != nil {
 		t.Fatal(err)

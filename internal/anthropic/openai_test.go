@@ -302,7 +302,7 @@ func TestBuildOpenAIRequestMapsViewImageToolResult(t *testing.T) {
 				OfToolUse: &sdk.ToolUseBlockParam{
 					ID:    "call_img",
 					Name:  "ViewImage",
-					Input: map[string]any{"file_path": "shot.png"},
+					Input: map[string]any{"path": "shot.png"},
 				},
 			}),
 			sdk.NewUserMessage(ToolResultBlock(ToolResult{

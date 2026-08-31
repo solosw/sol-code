@@ -227,7 +227,7 @@ func TestSessionCompactUsesEstimatedContextTokens(t *testing.T) {
 func TestSessionCompactPreservesStructuredToolIDs(t *testing.T) {
 	ctx := context.Background()
 	messages := []sdk.MessageParam{
-		sdk.NewAssistantMessage(sdk.NewToolUseBlock("toolu_keep", map[string]any{"file_path": "main.go", "old_string": "a", "new_string": "b"}, "Edit")),
+		sdk.NewAssistantMessage(sdk.NewToolUseBlock("toolu_keep", map[string]any{"path": "main.go", "old_string": "a", "new_string": "b"}, "Edit")),
 		sdk.NewUserMessage(sdk.NewToolResultBlock("toolu_keep", strings.Repeat("large tool output ", 200), true)),
 	}
 	result, err := session.Compact(ctx, "previous context", messages, nil, session.CompactOptions{
@@ -313,7 +313,7 @@ func TestSessionCompactDropsBashButPreservesEditLikeTools(t *testing.T) {
 	messages := []sdk.MessageParam{
 		sdk.NewAssistantMessage(sdk.NewToolUseBlock("toolu_bash", map[string]any{"command": "go test ./..."}, "Bash")),
 		sdk.NewUserMessage(sdk.NewToolResultBlock("toolu_bash", strings.Repeat("bash output ", 100), false)),
-		sdk.NewAssistantMessage(sdk.NewToolUseBlock("toolu_edit", map[string]any{"file_path": "a.txt", "old_string": "a", "new_string": "b"}, "Edit")),
+		sdk.NewAssistantMessage(sdk.NewToolUseBlock("toolu_edit", map[string]any{"path": "a.txt", "old_string": "a", "new_string": "b"}, "Edit")),
 		sdk.NewUserMessage(sdk.NewToolResultBlock("toolu_edit", "applied", false)),
 		sdk.NewAssistantMessage(sdk.NewToolUseBlock("toolu_fetch", map[string]any{"url": "https://example.com"}, "Fetch")),
 		sdk.NewUserMessage(sdk.NewToolResultBlock("toolu_fetch", strings.Repeat("fetch output ", 100), false)),
@@ -330,7 +330,7 @@ func TestSessionCompactDropsBashButPreservesEditLikeTools(t *testing.T) {
 	if strings.Contains(transcript, "toolu_bash") || strings.Contains(transcript, "go test ./...") || strings.Contains(transcript, "bash output") {
 		t.Fatalf("expected bash blocks removed entirely, got transcript %q", transcript)
 	}
-	if !strings.Contains(transcript, "file_path") || !strings.Contains(transcript, "[tool result]\napplied") {
+	if !strings.Contains(transcript, "path") || !strings.Contains(transcript, "[tool result]\napplied") {
 		t.Fatalf("expected edit tool payload and result preserved, got transcript %q", transcript)
 	}
 	if !strings.Contains(transcript, "toolu_fetch") {

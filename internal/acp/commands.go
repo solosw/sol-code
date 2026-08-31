@@ -20,7 +20,9 @@ type slashCommand struct {
 
 func parseSlashCommand(input string) (slashCommand, bool) {
 	input = strings.TrimSpace(input)
-	if !strings.HasPrefix(input, "/") || input == "/" {
+	// Only a single leading slash introduces a command. "//..." and bare "/"
+	// are ordinary chat (e.g. comments, paths, or incomplete typing).
+	if !strings.HasPrefix(input, "/") || strings.HasPrefix(input, "//") || input == "/" {
 		return slashCommand{}, false
 	}
 	body := strings.TrimSpace(strings.TrimPrefix(input, "/"))
@@ -30,10 +32,31 @@ func parseSlashCommand(input string) (slashCommand, bool) {
 	name, args, _ := strings.Cut(body, " ")
 	name = strings.ToLower(strings.TrimSpace(name))
 	args = strings.TrimSpace(args)
-	if name == "" {
+	if !isSlashCommandName(name) {
 		return slashCommand{}, false
 	}
 	return slashCommand{Name: name, Args: args}, true
+}
+
+// isSlashCommandName reports whether name is a plausible /command token.
+// Unknown-but-well-formed names may still fall through to chat later.
+func isSlashCommandName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			// ok
+		case r == '-' || r == '_' || r == '.':
+			if i == 0 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func slashHelpText() string {
@@ -66,15 +89,10 @@ func (s *Server) handleSlashCommand(ctx context.Context, sess *acpSession, input
 		return true, StopReasonEndTurn, fmt.Errorf("session is not ready")
 	}
 
-	// Unknown built-ins still handled; bare skill names fall through.
+	// Skills fall through to the agent loop (Skill tool). Anything else that
+	// isn't a builtin is ordinary chat — do not intercept with "Unknown command".
 	if !isBuiltinSlashCommand(cmd.Name) {
-		if sess.application.SkillRegistry != nil {
-			if _, found := sess.application.SkillRegistry.Find(cmd.Name); found {
-				return false, "", nil
-			}
-		}
-		s.emitText(sess, "agent_message_chunk", fmt.Sprintf("Unknown command: /%s. Try /help.", cmd.Name))
-		return true, StopReasonEndTurn, nil
+		return false, "", nil
 	}
 
 	persistencePath := config.PersistencePath("", sess.workDir)
@@ -176,8 +194,8 @@ func (s *Server) handleSlashCommand(ctx context.Context, sess *acpSession, input
 		s.emitText(sess, "agent_message_chunk", fmt.Sprintf("/%s is only available in the TUI for now.", cmd.Name))
 		return true, StopReasonEndTurn, nil
 	default:
-		s.emitText(sess, "agent_message_chunk", fmt.Sprintf("Unknown command: /%s. Try /help.", cmd.Name))
-		return true, StopReasonEndTurn, nil
+		// Builtins are listed exhaustively above; treat gaps as chat, not errors.
+		return false, "", nil
 	}
 }
 

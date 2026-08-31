@@ -20,7 +20,9 @@ type slashCommand struct {
 
 func parseSlashCommand(input string) (slashCommand, bool) {
 	input = strings.TrimSpace(input)
-	if !strings.HasPrefix(input, "/") || input == "/" {
+	// Only a single leading slash introduces a command. "//..." and bare "/"
+	// are ordinary chat (e.g. comments, paths, or incomplete typing).
+	if !strings.HasPrefix(input, "/") || strings.HasPrefix(input, "//") || input == "/" {
 		return slashCommand{}, false
 	}
 	body := strings.TrimSpace(strings.TrimPrefix(input, "/"))
@@ -30,10 +32,31 @@ func parseSlashCommand(input string) (slashCommand, bool) {
 	name, args, _ := strings.Cut(body, " ")
 	name = strings.ToLower(strings.TrimSpace(name))
 	args = strings.TrimSpace(args)
-	if name == "" {
+	if !isSlashCommandName(name) {
 		return slashCommand{}, false
 	}
 	return slashCommand{Name: name, Args: args}, true
+}
+
+// isSlashCommandName reports whether name is a plausible /command token.
+// Unknown-but-well-formed names may still fall through to chat later.
+func isSlashCommandName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			// ok
+		case r == '-' || r == '_' || r == '.':
+			if i == 0 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func slashHelpText() string {
@@ -88,7 +111,13 @@ func (m *Model) handleSlashCommand(input string) (bool, tea.Cmd) {
 			return true, tea.Batch(m.slashAsyncHandler("workflow", payload), m.nextSpinnerTick())
 		}
 	}
-	if !isBuiltinSlashCommand(cmd.Name) && m.isSkillName(cmd.Name) {
+	if !isBuiltinSlashCommand(cmd.Name) {
+		// Skills keep the special "/skill args" → Skill tool rewrite path.
+		if m.isSkillName(cmd.Name) {
+			return false, nil
+		}
+		// Anything else that looks like /foo but isn't a real command is just chat
+		// (paths, prose, typos). Do not intercept with "Unknown command".
 		return false, nil
 	}
 	m.messages = append(m.messages, ChatMessage{Role: "user", Content: input, TimeStamp: time.Now()})
@@ -214,7 +243,8 @@ func (m *Model) handleSlashCommand(input string) (bool, tea.Cmd) {
 			})
 		}
 	default:
-		m.appendCommandResult(fmt.Sprintf("Unknown command: /%s. Try /help.", cmd.Name))
+		// Builtins are listed exhaustively above; treat gaps as chat, not errors.
+		return false, nil
 	}
 	m.status = "Ready"
 	m.refreshViewport()

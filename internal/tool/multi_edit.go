@@ -30,7 +30,7 @@ func (t *multiEditTool) Description() string {
 	return `Applies multiple exact text replacements atomically across one or more files.
 Use this when one file has multiple changes or several files need targeted edits.
 
-Input: edits is an ordered list of file_path, old_string, new_string, and optional desc.
+Input: edits is an ordered list of path, old_string, new_string, and optional desc.
 Each old_string must occur exactly once in the file state produced by preceding edits.
 All edits are validated before any file is written; if validation fails, no files change.`
 }
@@ -46,12 +46,12 @@ func (t *multiEditTool) InputSchema() map[string]any {
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"file_path":  map[string]any{"type": "string"},
+						"path":  map[string]any{"type": "string"},
 						"old_string": map[string]any{"type": "string"},
 						"new_string": map[string]any{"type": "string"},
 						"desc":       map[string]any{"type": "string"},
 					},
-					"required": []string{"file_path", "old_string", "new_string"},
+					"required": []string{"path", "old_string", "new_string"},
 				},
 			},
 		},
@@ -68,8 +68,8 @@ func (t *multiEditTool) ValidateInput(_ context.Context, input json.RawMessage) 
 		return fmt.Errorf("at least one edit is required")
 	}
 	for i, edit := range params.Edits {
-		if strings.TrimSpace(edit.FilePath) == "" {
-			return fmt.Errorf("edits[%d].file_path is required", i)
+		if strings.TrimSpace(edit.Path) == "" {
+			return fmt.Errorf("edits[%d].path is required", i)
 		}
 		if _, errText := validateChangeDescription(edit.Desc); errText != "" {
 			return fmt.Errorf("edits[%d]: %s", i, errText)
@@ -98,7 +98,7 @@ func (t *multiEditTool) Invoke(ctx context.Context, uctx *UseContext, input json
 	files := make([]*stagedEditFile, 0, len(params.Edits))
 	byPath := make(map[string]*stagedEditFile, len(params.Edits))
 	for index, edit := range params.Edits {
-		path := ResolvePath(uctx, edit.FilePath)
+		path := ResolvePath(uctx, edit.Path)
 		if err := CheckAllowedPath(uctx, path); err != nil {
 			return ErrorResult(fmt.Sprintf("edits[%d]: %v", index, err)), nil
 		}
@@ -114,7 +114,7 @@ func (t *multiEditTool) Invoke(ctx context.Context, uctx *UseContext, input json
 			files = append(files, file)
 		}
 		if err := applyStagedEdit(file, edit); err != nil {
-			return ErrorResult(fmt.Sprintf("edits[%d] (%s): %v", index, edit.FilePath, err)), nil
+			return ErrorResult(fmt.Sprintf("edits[%d] (%s): %v", index, edit.Path, err)), nil
 		}
 		if desc, _ := validateChangeDescription(edit.Desc); desc != "" {
 			file.descs = append(file.descs, desc)

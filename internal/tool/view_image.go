@@ -13,7 +13,7 @@ import (
 
 // ViewImageParams is the input schema for the view_image tool.
 type ViewImageParams struct {
-	FilePath string `json:"file_path"`
+	Path string `json:"path"`
 }
 
 const (
@@ -61,7 +61,7 @@ func (v *viewImageTool) IsConcurrencySafe(_ json.RawMessage) bool { return true 
 func (v *viewImageTool) Description() string {
 	return `Reads an image file from disk and returns it so the model can see it (multimodal image block).
 Use this tool to examine screenshots, diagrams, photos, or other image files.
-- Provide file_path (absolute or relative to work dir).
+- Provide path (absolute or relative to work dir).
 - Maximum file size: 5MB.
 - Large images are resized (max edge 1280px) and re-encoded to reduce context tokens.
 - Supported send formats after optimization: jpeg, png, gif, webp.`
@@ -71,12 +71,12 @@ func (v *viewImageTool) InputSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"file_path": map[string]any{
+			"path": map[string]any{
 				"type":        "string",
 				"description": "The path to the image file to read (absolute or relative)",
 			},
 		},
-		"required": []string{"file_path"},
+		"required": []string{"path"},
 	}
 }
 
@@ -85,11 +85,11 @@ func (v *viewImageTool) Invoke(ctx context.Context, uctx *UseContext, input json
 	if err := json.Unmarshal(input, &params); err != nil {
 		return ErrorResult("invalid parameters: " + err.Error()), nil
 	}
-	if params.FilePath == "" {
-		return ErrorResult("file_path is required"), nil
+	if params.Path == "" {
+		return ErrorResult("path is required"), nil
 	}
 
-	filePath := ResolvePath(uctx, params.FilePath)
+	filePath := ResolvePath(uctx, params.Path)
 	if err := CheckAllowedPath(uctx, filePath); err != nil {
 		return ErrorResult(err.Error()), nil
 	}

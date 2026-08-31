@@ -41,7 +41,7 @@ func TestViewTool_Invoke(t *testing.T) {
 	uctx := &tool.UseContext{SessionID: "test", MessageID: "msg1", WorkDir: dir}
 
 	input, _ := json.Marshal(map[string]interface{}{
-		"file_path": "test.txt",
+		"path": "test.txt",
 	})
 	result, err := v.Invoke(context.Background(), uctx, input)
 	if err != nil {
@@ -64,7 +64,7 @@ func TestWriteAndEdit_API(t *testing.T) {
 	// Write a file
 	wt := tool.NewWriteTool()
 	writeInput, _ := json.Marshal(map[string]interface{}{
-		"file_path": "hello.go",
+		"path": "hello.go",
 		"content":   "package main\n\nfunc main() {\n\tprintln(\"hello\")\n}\n",
 	})
 	result, err := wt.Invoke(context.Background(), uctx, writeInput)
@@ -78,7 +78,7 @@ func TestWriteAndEdit_API(t *testing.T) {
 	// Edit the file
 	et := tool.NewEditTool()
 	editInput, _ := json.Marshal(map[string]interface{}{
-		"file_path":  filepath.Join(dir, "hello.go"),
+		"path":  filepath.Join(dir, "hello.go"),
 		"old_string": "println(\"hello\")",
 		"new_string": "println(\"hello, world\")",
 	})

@@ -26,7 +26,7 @@ func TestWriteToolRecordsDescribedChange(t *testing.T) {
 		RecordFileChange: func(_ context.Context, change tool.FileChange) {
 			recorded = change
 		},
-	}, json.RawMessage(`{"file_path":"notes.txt","content":"hello","desc":"add notes"}`))
+	}, json.RawMessage(`{"path":"notes.txt","content":"hello","desc":"add notes"}`))
 	if err != nil || content.IsError {
 		t.Fatalf("Invoke() = %#v, %v", content, err)
 	}

@@ -88,7 +88,7 @@ func TestProcessClientFakeLanguageServer(t *testing.T) {
 
 	resp, err := client.Request(ctx, Request{
 		Operation: OperationHover,
-		FilePath:  src,
+		Path:  src,
 		Line:      3,
 		Character: 6,
 		WorkDir:   work,
@@ -102,7 +102,7 @@ func TestProcessClientFakeLanguageServer(t *testing.T) {
 
 	resp, err = client.Request(ctx, Request{
 		Operation: OperationGoToDefinition,
-		FilePath:  src,
+		Path:  src,
 		Line:      3,
 		Character: 6,
 		WorkDir:   work,
@@ -202,7 +202,7 @@ func TestManagerFromCommandsNoServers(t *testing.T) {
 	defer m.Close()
 	_, err := m.Execute(context.Background(), Request{
 		Operation: OperationHover,
-		FilePath:  "x.go",
+		Path:  "x.go",
 		Line:      1,
 		Character: 1,
 	})

@@ -32,7 +32,7 @@ func (t *lspTool) InputSchema() map[string]any {
 				"description": "LSP operation to perform",
 				"enum":        []string{"document_symbol", "workspace_symbol", "go_to_definition", "find_references", "hover", "go_to_implementation"},
 			},
-			"file_path": map[string]any{"type": "string", "description": "File path for file-position based operations"},
+			"path": map[string]any{"type": "string", "description": "Path for file-position based operations"},
 			"line":      map[string]any{"type": "integer", "description": "1-based line number"},
 			"character": map[string]any{"type": "integer", "description": "1-based character offset"},
 			"query":     map[string]any{"type": "string", "description": "Workspace symbol search query"},

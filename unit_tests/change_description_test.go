@@ -23,7 +23,7 @@ func TestChangeDescriptionLimit(t *testing.T) {
 		{name: "rejects thirty-one Chinese characters", desc: strings.Repeat("汉", 31), want: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			content, err := write.Invoke(context.Background(), &tool.UseContext{WorkDir: workDir}, json.RawMessage(`{"file_path":"notes.txt","content":"hello","desc":"`+test.desc+`"}`))
+			content, err := write.Invoke(context.Background(), &tool.UseContext{WorkDir: workDir}, json.RawMessage(`{"path":"notes.txt","content":"hello","desc":"`+test.desc+`"}`))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -43,7 +43,7 @@ func TestToolExecutorRejectsOverlengthDesc(t *testing.T) {
 
 	result := engine.NewToolExecutor(registry, nil).Execute(context.Background(), engine.ToolCall{
 		Name:  tool.WriteToolName,
-		Input: json.RawMessage(`{"file_path":"notes.txt","content":"hello","desc":"` + strings.Repeat("汉", 31) + `"}`),
+		Input: json.RawMessage(`{"path":"notes.txt","content":"hello","desc":"` + strings.Repeat("汉", 31) + `"}`),
 	}, engine.ToolEnv{UseContext: &tool.UseContext{WorkDir: t.TempDir()}})
 
 	if !result.IsError || result.Content == nil {

@@ -11,7 +11,7 @@ import (
 
 func TestPermissionService_DefaultBlocksDestructiveTools(t *testing.T) {
 	service := permission.NewService(permission.ModeDefault)
-	decision := service.Check(tool.NewWriteTool(), json.RawMessage(`{"file_path":"x","content":"y"}`))
+	decision := service.Check(tool.NewWriteTool(), json.RawMessage(`{"path":"x","content":"y"}`))
 	if decision.Allowed {
 		t.Fatalf("expected destructive tool to be blocked by default")
 	}
@@ -19,7 +19,7 @@ func TestPermissionService_DefaultBlocksDestructiveTools(t *testing.T) {
 
 func TestPermissionService_BypassAllowsDestructiveTools(t *testing.T) {
 	service := permission.NewService(permission.ModeBypass)
-	decision := service.Check(tool.NewWriteTool(), json.RawMessage(`{"file_path":"x","content":"y"}`))
+	decision := service.Check(tool.NewWriteTool(), json.RawMessage(`{"path":"x","content":"y"}`))
 	if !decision.Allowed {
 		t.Fatalf("expected bypass mode to allow destructive tool, got %q", decision.Reason)
 	}

@@ -12,7 +12,7 @@ import (
 
 // DiffParams is the input schema for the diff tool.
 type DiffParams struct {
-	FilePath string `json:"file_path"`
+	Path string `json:"path"`
 	Content  string `json:"content"`
 }
 
@@ -34,7 +34,7 @@ func (d *diffTool) IsConcurrencySafe(_ json.RawMessage) bool { return true }
 func (d *diffTool) Description() string {
 	return `Generates a unified diff between the file on disk and the provided content.
 Use this to preview changes before applying them with Write or Edit.
-- Provide file_path (absolute or relative to work dir).
+- Provide path (absolute or relative to work dir).
 - Provide the proposed new content.
 - Returns a unified diff.`
 }
@@ -43,7 +43,7 @@ func (d *diffTool) InputSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"file_path": map[string]any{
+			"path": map[string]any{
 				"type":        "string",
 				"description": "The path to the file to diff (absolute or relative)",
 			},
@@ -52,7 +52,7 @@ func (d *diffTool) InputSchema() map[string]any {
 				"description": "The proposed new content to diff against",
 			},
 		},
-		"required": []string{"file_path", "content"},
+		"required": []string{"path", "content"},
 	}
 }
 
@@ -62,11 +62,11 @@ func (d *diffTool) Invoke(ctx context.Context, uctx *UseContext, input json.RawM
 		return ErrorResult("invalid parameters: " + err.Error()), nil
 	}
 
-	if params.FilePath == "" {
-		return ErrorResult("file_path is required"), nil
+	if params.Path == "" {
+		return ErrorResult("path is required"), nil
 	}
 
-	filePath := ResolvePath(uctx, params.FilePath)
+	filePath := ResolvePath(uctx, params.Path)
 	if err := CheckAllowedPath(uctx, filePath); err != nil {
 		return ErrorResult(err.Error()), nil
 	}

@@ -13,7 +13,7 @@ func TestSummarizeForContextStructuredSections(t *testing.T) {
 		`user: 现在记忆太分散了，记忆还应该在后台单独触发才对`,
 		`assistant: 我会检查当前 memory trigger 和 retrieval budgeting。`,
 		`assistant: [tool use: Edit]`,
-		`assistant: {"file_path":"internal/app/app.go","old_string":"a","new_string":"b"}`,
+		`assistant: {"path":"internal/app/app.go","old_string":"a","new_string":"b"}`,
 		`user: [tool result]`,
 		`user: applied patch successfully`,
 		`assistant: [tool use: Bash]`,

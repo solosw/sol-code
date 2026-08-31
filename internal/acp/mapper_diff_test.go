@@ -17,7 +17,7 @@ func TestToolCallDiffsEditAndWrite(t *testing.T) {
 	}
 
 	editInput, _ := json.Marshal(tool.EditParams{
-		FilePath:  path,
+		Path:  path,
 		OldString: "world",
 		NewString: "solcode",
 	})
@@ -38,7 +38,7 @@ func TestToolCallDiffsEditAndWrite(t *testing.T) {
 	// Ensure ACP JSON uses null oldText for new files.
 	newPath := filepath.Join(dir, "created.txt")
 	writeInput, _ := json.Marshal(tool.WriteParams{
-		FilePath: newPath,
+		Path: newPath,
 		Content:  "brand new\n",
 	})
 	content, locations = toolCallDiffs(tool.WriteToolName, writeInput, dir)
@@ -76,8 +76,8 @@ func TestToolCallDiffsMultiWrite(t *testing.T) {
 	created := filepath.Join(dir, "b.txt")
 	input, _ := json.Marshal(tool.MultiWriteParams{
 		Files: []tool.WriteParams{
-			{FilePath: existing, Content: "new-a\n"},
-			{FilePath: created, Content: "new-b\n"},
+			{Path: existing, Content: "new-a\n"},
+			{Path: created, Content: "new-b\n"},
 		},
 	})
 	content, locations := toolCallDiffs(tool.MultiWriteToolName, input, dir)

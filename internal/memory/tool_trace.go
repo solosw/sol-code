@@ -161,7 +161,7 @@ func jsonFields(text string) map[string]string {
 			flattenJSONFields("", raw, fields)
 		}
 	}
-	for _, key := range []string{"file_path", "path", "command", "old_string", "new_string", "patch_text"} {
+	for _, key := range []string{"path", "path", "command", "old_string", "new_string", "patch_text"} {
 		if fields[key] != "" {
 			continue
 		}
@@ -196,7 +196,7 @@ func flattenJSONFields(prefix string, value any, out map[string]string) {
 
 func pathsForCall(fields map[string]string, raw string) []string {
 	seen := map[string]bool{}
-	for _, key := range []string{"file_path", "path"} {
+	for _, key := range []string{"path", "path"} {
 		if value := strings.TrimSpace(fields[key]); value != "" {
 			seen[value] = true
 		}

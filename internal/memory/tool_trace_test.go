@@ -9,7 +9,7 @@ import (
 func TestExtractToolTraceMemories(t *testing.T) {
 	input := ExtractionInput{Transcript: strings.Join([]string{
 		`assistant: [tool use: Edit]`,
-		`{"file_path":"internal/app/app.go","old_string":"old behavior","new_string":"new behavior"}`,
+		`{"path":"internal/app/app.go","old_string":"old behavior","new_string":"new behavior"}`,
 		`assistant: [tool use: Bash]`,
 		`{"command":"go test ./internal/app ./internal/session"}`,
 	}, "\n")}
@@ -36,9 +36,9 @@ func TestExtractToolTraceMemories(t *testing.T) {
 func TestExtractToolTraceMemoriesPrioritizesPerFileModifications(t *testing.T) {
 	input := ExtractionInput{CompactedTranscript: strings.Join([]string{
 		`assistant: [tool use: Write]`,
-		`{"file_path":"internal/session/compactor.go","content":"new compactor implementation"}`,
+		`{"path":"internal/session/compactor.go","content":"new compactor implementation"}`,
 		`assistant: [tool use: Patch]`,
-		`{"file_path":"internal/memory/anthropic_extractor.go","patch_text":"+prompt requires per-file modification summaries"}`,
+		`{"path":"internal/memory/anthropic_extractor.go","patch_text":"+prompt requires per-file modification summaries"}`,
 		`assistant: [tool use: Bash]`,
 		`{"command":"gofmt -w internal/session/compactor.go internal/memory/anthropic_extractor.go"}`,
 	}, "\n")}
@@ -67,7 +67,7 @@ func TestRememberExtractedStoresToolTraceWithoutExtractor(t *testing.T) {
 		SourceSessionID: "main",
 		WorkDir:         t.TempDir(),
 		Transcript: `[tool use: Write]
-{"file_path":"internal/memory/tool_trace.go","content":"updated extraction"}`,
+{"path":"internal/memory/tool_trace.go","content":"updated extraction"}`,
 	})
 	if err != nil {
 		t.Fatalf("RememberExtracted() error = %v", err)

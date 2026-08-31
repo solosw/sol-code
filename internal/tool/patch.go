@@ -12,7 +12,7 @@ import (
 
 // PatchParams is the input schema for the patch tool.
 type PatchParams struct {
-	FilePath  string `json:"file_path"`
+	Path  string `json:"path"`
 	PatchText string `json:"patch_text"`
 	Desc      string `json:"desc,omitempty"`
 }
@@ -46,7 +46,7 @@ func (p *patchTool) ValidateInput(_ context.Context, input json.RawMessage) erro
 
 func (p *patchTool) Description() string {
 	return `Applies a unified diff patch to a file.
-- Provide file_path (absolute or relative to work dir).
+- Provide path (absolute or relative to work dir).
 - Provide the patch in unified diff format.
 - Optionally provide desc, a change description of up to 30 Chinese characters.
 - The file must exist before applying the patch.
@@ -57,7 +57,7 @@ func (p *patchTool) InputSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"file_path": map[string]any{
+			"path": map[string]any{
 				"type":        "string",
 				"description": "The path to the file to patch (absolute or relative)",
 			},
@@ -71,7 +71,7 @@ func (p *patchTool) InputSchema() map[string]any {
 				"maxLength":   maxChangeDescriptionRunes,
 			},
 		},
-		"required": []string{"file_path", "patch_text"},
+		"required": []string{"path", "patch_text"},
 	}
 }
 
@@ -81,8 +81,8 @@ func (p *patchTool) Invoke(ctx context.Context, uctx *UseContext, input json.Raw
 		return ErrorResult("invalid parameters: " + err.Error()), nil
 	}
 
-	if params.FilePath == "" {
-		return ErrorResult("file_path is required"), nil
+	if params.Path == "" {
+		return ErrorResult("path is required"), nil
 	}
 	if params.PatchText == "" {
 		return ErrorResult("patch_text is required"), nil
@@ -92,7 +92,7 @@ func (p *patchTool) Invoke(ctx context.Context, uctx *UseContext, input json.Raw
 		return ErrorResult(errText), nil
 	}
 
-	filePath := ResolvePath(uctx, params.FilePath)
+	filePath := ResolvePath(uctx, params.Path)
 	if err := CheckAllowedPath(uctx, filePath); err != nil {
 		return ErrorResult(err.Error()), nil
 	}

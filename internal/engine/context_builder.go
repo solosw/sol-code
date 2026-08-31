@@ -164,7 +164,7 @@ func sanitizeContextSessionSummaryLine(line string) string {
 		`"new_string"`,
 		`"patch_text"`,
 		`"command"`,
-		`"file_path"`,
+		`"path"`,
 		`"tool_id"`,
 		"tool call preserved as summarized metadata",
 		"files := dedupesummarylines",

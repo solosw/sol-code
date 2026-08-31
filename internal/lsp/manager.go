@@ -68,16 +68,16 @@ func (m *Manager) Close() error {
 func Validate(req Request) error {
 	switch req.Operation {
 	case OperationDocumentSymbol:
-		if req.FilePath == "" {
-			return fmt.Errorf("file_path is required for %s", req.Operation)
+		if req.Path == "" {
+			return fmt.Errorf("path is required for %s", req.Operation)
 		}
 	case OperationWorkspaceSymbol:
 		if req.Query == "" {
 			return fmt.Errorf("query is required for %s", req.Operation)
 		}
 	case OperationGoToDefinition, OperationFindReferences, OperationHover, OperationGoToImplementation:
-		if req.FilePath == "" {
-			return fmt.Errorf("file_path is required for %s", req.Operation)
+		if req.Path == "" {
+			return fmt.Errorf("path is required for %s", req.Operation)
 		}
 		if req.Line <= 0 {
 			return fmt.Errorf("line must be >= 1 for %s", req.Operation)

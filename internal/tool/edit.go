@@ -11,7 +11,7 @@ import (
 
 // EditParams is the input schema for the edit tool.
 type EditParams struct {
-	FilePath  string `json:"file_path"`
+	Path  string `json:"path"`
 	OldString string `json:"old_string"`
 	NewString string `json:"new_string"`
 	Desc      string `json:"desc,omitempty"`
@@ -49,14 +49,14 @@ func (e *editTool) Description() string {
 Use this for small, precise changes. For larger edits, use the Write tool.
 
 Requirements:
-1. file_path: Absolute or relative path to the file
+1. path: Absolute or relative path to the file
 2. old_string: The text to replace (must be UNIQUE in the file, must match exactly)
 3. new_string: The replacement text
 4. desc (optional): A change description of up to 30 Chinese characters
 
 Special cases:
-- To create a new file: provide file_path and new_string, leave old_string empty
-- To delete content: provide file_path and old_string, leave new_string empty
+- To create a new file: provide path and new_string, leave old_string empty
+- To delete content: provide path and old_string, leave new_string empty
 
 CRITICAL:
 - The old_string must uniquely identify the instance to change
@@ -69,7 +69,7 @@ func (e *editTool) InputSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"file_path": map[string]any{
+			"path": map[string]any{
 				"type":        "string",
 				"description": "The absolute path to the file to modify",
 			},
@@ -87,7 +87,7 @@ func (e *editTool) InputSchema() map[string]any {
 				"maxLength":   maxChangeDescriptionRunes,
 			},
 		},
-		"required": []string{"file_path", "old_string", "new_string"},
+		"required": []string{"path", "old_string", "new_string"},
 	}
 }
 
@@ -97,15 +97,15 @@ func (e *editTool) Invoke(ctx context.Context, uctx *UseContext, input json.RawM
 		return ErrorResult("invalid parameters: " + err.Error()), nil
 	}
 
-	if params.FilePath == "" {
-		return ErrorResult("file_path is required"), nil
+	if params.Path == "" {
+		return ErrorResult("path is required"), nil
 	}
 	desc, errText := validateChangeDescription(params.Desc)
 	if errText != "" {
 		return ErrorResult(errText), nil
 	}
 
-	filePath := params.FilePath
+	filePath := params.Path
 	filePath = ResolvePath(uctx, filePath)
 	if err := CheckAllowedPath(uctx, filePath); err != nil {
 		return ErrorResult(err.Error()), nil

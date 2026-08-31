@@ -1429,7 +1429,7 @@ func conciseConversationLines(transcript string) []string {
 		if content == "" || isBareTrivialContinuationSummaryLine(content) {
 			continue
 		}
-		if strings.Contains(contentLower, `"file_path"`) || strings.Contains(contentLower, `"old_string"`) || strings.Contains(contentLower, `"new_string"`) || strings.Contains(contentLower, `"patch_text"`) || strings.Contains(contentLower, `"tool_id"`) {
+		if strings.Contains(contentLower, `"path"`) || strings.Contains(contentLower, `"old_string"`) || strings.Contains(contentLower, `"new_string"`) || strings.Contains(contentLower, `"patch_text"`) || strings.Contains(contentLower, `"tool_id"`) {
 			continue
 		}
 		if isNoisySummaryLine(content) || looksLikeSummaryCodeLine(content) {
@@ -1865,7 +1865,7 @@ func sanitizeTranscriptSummaryLines(lines []string) []string {
 		if strings.HasPrefix(lower, "assistant: [tool use:") || strings.HasPrefix(lower, "user: [tool result]") {
 			continue
 		}
-		if strings.Contains(lower, `"file_path"`) || strings.Contains(lower, `"path"`) || strings.Contains(lower, `"old_string"`) || strings.Contains(lower, `"new_string"`) || strings.Contains(lower, `"patch_text"`) || strings.Contains(lower, `"tool_id"`) || strings.Contains(lower, `"summary":"tool call preserved as summarized metadata`) {
+		if strings.Contains(lower, `"path"`) || strings.Contains(lower, `"path"`) || strings.Contains(lower, `"old_string"`) || strings.Contains(lower, `"new_string"`) || strings.Contains(lower, `"patch_text"`) || strings.Contains(lower, `"tool_id"`) || strings.Contains(lower, `"summary":"tool call preserved as summarized metadata`) {
 			continue
 		}
 		if strings.HasPrefix(lower, "current todos:") || strings.HasPrefix(lower, "retrieved memory:") || strings.HasPrefix(lower, "session summary:") {
@@ -2467,7 +2467,7 @@ func sanitizeSummaryOutputLine(line string, allowUserMessages bool, allowBareCom
 		`"new_string"`,
 		`"patch_text"`,
 		`"command"`,
-		`"file_path"`,
+		`"path"`,
 		`"tool_id"`,
 		"todos.json",
 		"[tool use:",

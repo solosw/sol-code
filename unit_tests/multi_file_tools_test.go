@@ -22,9 +22,9 @@ func TestMultiEditAppliesOrderedEditsAcrossFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	input := `{"edits":[
-		{"file_path":"first.txt","old_string":"alpha","new_string":"ALPHA","desc":"capitalize alpha"},
-		{"file_path":"first.txt","old_string":"beta","new_string":"BETA","desc":"capitalize beta"},
-		{"file_path":"second.txt","old_string":"two","new_string":"TWO","desc":"capitalize two"}
+		{"path":"first.txt","old_string":"alpha","new_string":"ALPHA","desc":"capitalize alpha"},
+		{"path":"first.txt","old_string":"beta","new_string":"BETA","desc":"capitalize beta"},
+		{"path":"second.txt","old_string":"two","new_string":"TWO","desc":"capitalize two"}
 	]}`
 	var changes []tool.FileChange
 	content, err := tool.NewMultiEditTool().Invoke(context.Background(), &tool.UseContext{
@@ -57,8 +57,8 @@ func TestMultiEditDoesNotWriteWhenAnyEditIsInvalid(t *testing.T) {
 		t.Fatal(err)
 	}
 	input := `{"edits":[
-		{"file_path":"first.txt","old_string":"before-first","new_string":"after-first"},
-		{"file_path":"second.txt","old_string":"missing","new_string":"after-second"}
+		{"path":"first.txt","old_string":"before-first","new_string":"after-first"},
+		{"path":"second.txt","old_string":"missing","new_string":"after-second"}
 	]}`
 	content, err := tool.NewMultiEditTool().Invoke(context.Background(), &tool.UseContext{WorkDir: dir}, json.RawMessage(input))
 	if err != nil || !content.IsError {
@@ -71,8 +71,8 @@ func TestMultiEditDoesNotWriteWhenAnyEditIsInvalid(t *testing.T) {
 func TestMultiWriteWritesMultipleFiles(t *testing.T) {
 	dir := t.TempDir()
 	input := `{"files":[
-		{"file_path":"nested/one.txt","content":"one","desc":"create first file"},
-		{"file_path":"nested/two.txt","content":"two","desc":"create second file"}
+		{"path":"nested/one.txt","content":"one","desc":"create first file"},
+		{"path":"nested/two.txt","content":"two","desc":"create second file"}
 	]}`
 	content, err := tool.NewMultiWriteTool().Invoke(context.Background(), &tool.UseContext{WorkDir: dir}, json.RawMessage(input))
 	if err != nil || content.IsError {
@@ -88,8 +88,8 @@ func TestMultiWriteWritesMultipleFiles(t *testing.T) {
 func TestMultiWriteRejectsDuplicatePathsWithoutWriting(t *testing.T) {
 	dir := t.TempDir()
 	input := `{"files":[
-		{"file_path":"same.txt","content":"first"},
-		{"file_path":"same.txt","content":"second"}
+		{"path":"same.txt","content":"first"},
+		{"path":"same.txt","content":"second"}
 	]}`
 	content, err := tool.NewMultiWriteTool().Invoke(context.Background(), &tool.UseContext{WorkDir: dir}, json.RawMessage(input))
 	if err != nil || !content.IsError {

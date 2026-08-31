@@ -13,7 +13,7 @@ import (
 
 // WriteParams is the input schema for the write tool.
 type WriteParams struct {
-	FilePath string `json:"file_path"`
+	Path string `json:"path"`
 	Content  string `json:"content"`
 	Desc     string `json:"desc,omitempty"`
 }
@@ -47,7 +47,7 @@ func (w *writeTool) ValidateInput(_ context.Context, input json.RawMessage) erro
 
 func (w *writeTool) Description() string {
 	return `File writing tool that creates or completely overwrites files.
-- Provide file_path (absolute or relative to work dir).
+- Provide path (absolute or relative to work dir).
 - Provide the full content to write.
 - Optionally provide desc, a change description of up to 30 Chinese characters.
 - Creates parent directories automatically.
@@ -59,7 +59,7 @@ func (w *writeTool) InputSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"file_path": map[string]any{
+			"path": map[string]any{
 				"type":        "string",
 				"description": "The path to the file to write (absolute or relative)",
 			},
@@ -73,7 +73,7 @@ func (w *writeTool) InputSchema() map[string]any {
 				"maxLength":   maxChangeDescriptionRunes,
 			},
 		},
-		"required": []string{"file_path", "content"},
+		"required": []string{"path", "content"},
 	}
 }
 
@@ -83,15 +83,15 @@ func (w *writeTool) Invoke(ctx context.Context, uctx *UseContext, input json.Raw
 		return ErrorResult("invalid parameters: " + err.Error()), nil
 	}
 
-	if params.FilePath == "" {
-		return ErrorResult("file_path is required"), nil
+	if params.Path == "" {
+		return ErrorResult("path is required"), nil
 	}
 	desc, errText := validateChangeDescription(params.Desc)
 	if errText != "" {
 		return ErrorResult(errText), nil
 	}
 
-	filePath := params.FilePath
+	filePath := params.Path
 	filePath = ResolvePath(uctx, filePath)
 	if err := CheckAllowedPath(uctx, filePath); err != nil {
 		return ErrorResult(err.Error()), nil

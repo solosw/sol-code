@@ -28,7 +28,7 @@ func (t *multiWriteTool) Description() string {
 	return `Writes complete contents to multiple files atomically.
 Use this when creating or replacing several files in one coordinated change.
 
-Input: files is a list of file_path, content, and optional desc. All paths are
+Input: files is a list of path, content, and optional desc. All paths are
 validated before writing. If a write fails, files already written by this call
 are restored to their prior contents or removed when newly created.`
 }
@@ -44,11 +44,11 @@ func (t *multiWriteTool) InputSchema() map[string]any {
 				"items": map[string]any{
 					"type": "object",
 					"properties": map[string]any{
-						"file_path": map[string]any{"type": "string"},
+						"path": map[string]any{"type": "string"},
 						"content":   map[string]any{"type": "string"},
 						"desc":      map[string]any{"type": "string"},
 					},
-					"required": []string{"file_path", "content"},
+					"required": []string{"path", "content"},
 				},
 			},
 		},
@@ -65,8 +65,8 @@ func (t *multiWriteTool) ValidateInput(_ context.Context, input json.RawMessage)
 		return fmt.Errorf("at least one file is required")
 	}
 	for i, file := range params.Files {
-		if strings.TrimSpace(file.FilePath) == "" {
-			return fmt.Errorf("files[%d].file_path is required", i)
+		if strings.TrimSpace(file.Path) == "" {
+			return fmt.Errorf("files[%d].path is required", i)
 		}
 		if _, errText := validateChangeDescription(file.Desc); errText != "" {
 			return fmt.Errorf("files[%d]: %s", i, errText)
@@ -87,12 +87,12 @@ func (t *multiWriteTool) Invoke(ctx context.Context, uctx *UseContext, input jso
 	files := make([]*stagedEditFile, 0, len(params.Files))
 	seen := make(map[string]struct{}, len(params.Files))
 	for index, write := range params.Files {
-		path := ResolvePath(uctx, write.FilePath)
+		path := ResolvePath(uctx, write.Path)
 		if err := CheckAllowedPath(uctx, path); err != nil {
 			return ErrorResult(fmt.Sprintf("files[%d]: %v", index, err)), nil
 		}
 		if _, exists := seen[path]; exists {
-			return ErrorResult(fmt.Sprintf("files[%d]: duplicate file_path %s", index, write.FilePath)), nil
+			return ErrorResult(fmt.Sprintf("files[%d]: duplicate path %s", index, write.Path)), nil
 		}
 		seen[path] = struct{}{}
 		data, err := ReadTextFileContent(ctx, uctx, path)

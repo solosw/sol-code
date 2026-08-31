@@ -43,7 +43,7 @@ func TestViewReadsUserDirectorySkillReferenceByRelativePath(t *testing.T) {
 	result, err := view.Invoke(context.Background(), &tool.UseContext{
 		WorkDir:    workDir,
 		SkillRoots: []string{skillRoot},
-	}, json.RawMessage(`{"file_path":"references/guide.md"}`))
+	}, json.RawMessage(`{"path":"references/guide.md"}`))
 	if err != nil {
 		t.Fatal(err)
 	}

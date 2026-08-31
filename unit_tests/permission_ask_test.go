@@ -15,7 +15,7 @@ func TestPermissionServiceAskAllowsDestructive(t *testing.T) {
 		asked = true
 		return true
 	})
-	decision := service.Check(tool.NewWriteTool(), json.RawMessage(`{"file_path":"x","content":"y"}`))
+	decision := service.Check(tool.NewWriteTool(), json.RawMessage(`{"path":"x","content":"y"}`))
 	if !asked {
 		t.Fatal("expected ask callback to be invoked for destructive tool")
 	}
@@ -29,7 +29,7 @@ func TestPermissionServiceAskDeniesWhenUserRefuses(t *testing.T) {
 	service.SetAskFunc(func(toolName, description string) bool {
 		return false
 	})
-	decision := service.Check(tool.NewWriteTool(), json.RawMessage(`{"file_path":"x","content":"y"}`))
+	decision := service.Check(tool.NewWriteTool(), json.RawMessage(`{"path":"x","content":"y"}`))
 	if decision.Allowed {
 		t.Fatal("expected destructive tool to be denied when user refuses")
 	}
@@ -53,7 +53,7 @@ func TestPermissionServiceAcceptEditsAllowsFileEditsWithoutAsk(t *testing.T) {
 		t.Fatal("ask callback should not be invoked for edit tools in accept_edits mode")
 		return false
 	})
-	decision := service.Check(tool.NewEditTool(), json.RawMessage(`{"file_path":"x","old_string":"a","new_string":"b"}`))
+	decision := service.Check(tool.NewEditTool(), json.RawMessage(`{"path":"x","old_string":"a","new_string":"b"}`))
 	if !decision.Allowed {
 		t.Fatalf("expected Edit to be allowed in accept_edits mode, got %q", decision.Reason)
 	}

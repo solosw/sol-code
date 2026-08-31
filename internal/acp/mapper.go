@@ -261,10 +261,10 @@ func toolCallDiffs(name string, input json.RawMessage, workDir string) (content 
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case strings.ToLower(tool.EditToolName):
 		var params tool.EditParams
-		if err := json.Unmarshal(input, &params); err != nil || strings.TrimSpace(params.FilePath) == "" {
+		if err := json.Unmarshal(input, &params); err != nil || strings.TrimSpace(params.Path) == "" {
 			return nil, nil
 		}
-		path := tool.ResolvePath(uctx, params.FilePath)
+		path := tool.ResolvePath(uctx, params.Path)
 		oldText, existed, err := readFileText(path)
 		if err != nil {
 			return nil, toolLocations(path)
@@ -277,10 +277,10 @@ func toolCallDiffs(name string, input json.RawMessage, workDir string) (content 
 
 	case strings.ToLower(tool.WriteToolName):
 		var params tool.WriteParams
-		if err := json.Unmarshal(input, &params); err != nil || strings.TrimSpace(params.FilePath) == "" {
+		if err := json.Unmarshal(input, &params); err != nil || strings.TrimSpace(params.Path) == "" {
 			return nil, nil
 		}
-		path := tool.ResolvePath(uctx, params.FilePath)
+		path := tool.ResolvePath(uctx, params.Path)
 		oldText, existed, err := readFileText(path)
 		if err != nil {
 			return nil, toolLocations(path)
@@ -293,10 +293,10 @@ func toolCallDiffs(name string, input json.RawMessage, workDir string) (content 
 			return nil, nil
 		}
 		for _, file := range params.Files {
-			if strings.TrimSpace(file.FilePath) == "" {
+			if strings.TrimSpace(file.Path) == "" {
 				continue
 			}
-			path := tool.ResolvePath(uctx, file.FilePath)
+			path := tool.ResolvePath(uctx, file.Path)
 			oldText, existed, err := readFileText(path)
 			if err != nil {
 				locations = append(locations, ToolCallLocation{Path: path})
@@ -321,10 +321,10 @@ func toolCallDiffs(name string, input json.RawMessage, workDir string) (content 
 		order := make([]string, 0)
 		byPath := make(map[string]*staged)
 		for _, edit := range params.Edits {
-			if strings.TrimSpace(edit.FilePath) == "" {
+			if strings.TrimSpace(edit.Path) == "" {
 				continue
 			}
-			path := tool.ResolvePath(uctx, edit.FilePath)
+			path := tool.ResolvePath(uctx, edit.Path)
 			file := byPath[path]
 			if file == nil {
 				oldText, existed, err := readFileText(path)
@@ -358,10 +358,10 @@ func toolCallDiffs(name string, input json.RawMessage, workDir string) (content 
 
 	case strings.ToLower(tool.PatchToolName):
 		var params tool.PatchParams
-		if err := json.Unmarshal(input, &params); err != nil || strings.TrimSpace(params.FilePath) == "" {
+		if err := json.Unmarshal(input, &params); err != nil || strings.TrimSpace(params.Path) == "" {
 			return nil, nil
 		}
-		path := tool.ResolvePath(uctx, params.FilePath)
+		path := tool.ResolvePath(uctx, params.Path)
 		// Patch apply lives inside the tool; expose path + patch text for UI.
 		return []ToolCallContent{{
 			Type: "content",

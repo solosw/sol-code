@@ -25,7 +25,7 @@ func commonToolSummary(toolName string, fields map[string]any) string {
 	if todos, ok := fields["todos"].([]any); ok {
 		return fmt.Sprintf("%d items", len(todos))
 	}
-	keys := []string{"command", "file_path", "path", "url", "pattern", "query", "prompt", "description", "memory", "skill"}
+	keys := []string{"command", "path", "path", "url", "pattern", "query", "prompt", "description", "memory", "skill"}
 	for _, key := range keys {
 		if value := fieldString(fields, key); value != "" {
 			return value

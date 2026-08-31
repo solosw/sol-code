@@ -70,7 +70,7 @@ func (c *ProcessClient) resolveCommand(req Request) (ServerCommand, string, erro
 		workDir = wd
 	}
 
-	filePath := strings.TrimSpace(req.FilePath)
+	filePath := strings.TrimSpace(req.Path)
 	if filePath != "" {
 		if !filepath.IsAbs(filePath) && workDir != "" {
 			filePath = filepath.Join(workDir, filePath)
@@ -130,7 +130,7 @@ func (s *session) execute(ctx context.Context, req Request) (Response, error) {
 		return out, nil
 
 	case OperationDocumentSymbol:
-		uri, err := s.ensureOpen(ctx, resolvePath(req.WorkDir, req.FilePath))
+		uri, err := s.ensureOpen(ctx, resolvePath(req.WorkDir, req.Path))
 		if err != nil {
 			return out, err
 		}
@@ -144,7 +144,7 @@ func (s *session) execute(ctx context.Context, req Request) (Response, error) {
 		return out, nil
 
 	case OperationGoToDefinition, OperationFindReferences, OperationHover, OperationGoToImplementation:
-		path := resolvePath(req.WorkDir, req.FilePath)
+		path := resolvePath(req.WorkDir, req.Path)
 		uri, err := s.ensureOpen(ctx, path)
 		if err != nil {
 			return out, err

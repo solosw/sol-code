@@ -14,6 +14,7 @@ A terminal-based coding agent powered by Claude (Anthropic API) that can read, w
 - **20+ built-in tools** — Bash, Edit, Write, View, ViewImage, Grep, Glob, LS, Diff, Patch, Fetch, WebSearch, LSP, MCP, TodoWrite, WriteMemory, ReadMemory, AskUser, Task (sub-agents), and more.
 - **MCP (Model Context Protocol)** — Connect to external MCP servers over stdio or HTTP.
 - **Custom skills** — Define reusable skill files loaded from configurable directories.
+- **Project rules** — Markdown instructions in `<project>/.solcode/rules.md` and `.solcode/rules/*.md` are injected into the system prompt at startup.
 - **Hook system** — Execute shell commands on agent events (tool calls, results, completion).
 - **Permission modes** — `auto`, `accept_edits`, `bypass`, `yolo`, `plan` — control how tools are authorized.
 - **Sub-agent coordinator** — The `task` tool spawns isolated sub-agents for parallel or independent work.
@@ -128,6 +129,23 @@ solcode [flags]
 | `-acp` | off | Run as an Agent Client Protocol server on stdio (mutually exclusive with `-prompt` / TUI) |
 
 Config auto-discovery looks for `~/.solcode/settings.json`, `~/.solcode/settings.local.json`, `./.solcode/settings.json`, and `./.solcode/settings.local.json` in order; later files merge on top.
+
+### Project rules
+
+Project-only agent instructions live under the working directory's `.solcode` folder and are injected into the system prompt at startup (not user-level `~/.solcode`):
+
+```
+<project>/.solcode/rules.md          # optional single file
+<project>/.solcode/rules/*.md        # optional extra files, loaded in name order
+```
+
+```markdown
+# .solcode/rules.md
+Always run go test after code changes.
+Prefer table-driven tests.
+```
+
+Missing files are ignored. These rules apply only to this project.
 
 ### Agent Client Protocol (ACP)
 

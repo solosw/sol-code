@@ -1062,3 +1062,52 @@ func mustMkdirAll(t *testing.T, path string) {
 		t.Fatalf("mkdir %q: %v", path, err)
 	}
 }
+
+func TestLoadProjectRulesFromSolcode(t *testing.T) {
+	workDir := t.TempDir()
+	solcode := filepath.Join(workDir, ".solcode")
+	rulesDir := filepath.Join(solcode, "rules")
+	mustMkdirAll(t, rulesDir)
+	writeFile(t, filepath.Join(solcode, "rules.md"), "Always run go test after edits.")
+	writeFile(t, filepath.Join(rulesDir, "style.md"), "Prefer table-driven tests.")
+	writeFile(t, filepath.Join(rulesDir, "hidden.txt"), "ignore me")
+	writeFile(t, filepath.Join(rulesDir, ".skip.md"), "also ignore")
+
+	got := config.LoadProjectRules(workDir)
+	if !strings.Contains(got, "Always run go test after edits.") {
+		t.Fatalf("missing rules.md content: %q", got)
+	}
+	if !strings.Contains(got, "### style") || !strings.Contains(got, "Prefer table-driven tests.") {
+		t.Fatalf("missing rules/style.md content: %q", got)
+	}
+	if strings.Contains(got, "ignore me") || strings.Contains(got, "also ignore") {
+		t.Fatalf("loaded non-markdown or hidden files: %q", got)
+	}
+
+	prompt := config.FormatProjectRulesPrompt(got)
+	if !strings.HasPrefix(prompt, "Project rules:") {
+		t.Fatalf("formatted prompt = %q, want Project rules header", prompt)
+	}
+}
+
+func TestLoadProjectRulesIgnoresUserHomeSolcode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	mustMkdirAll(t, filepath.Join(home, ".solcode"))
+	writeFile(t, filepath.Join(home, ".solcode", "rules.md"), "user-level rule must not load")
+
+	workDir := t.TempDir()
+	if got := config.LoadProjectRules(workDir); got != "" {
+		t.Fatalf("LoadProjectRules() = %q, want empty without project .solcode", got)
+	}
+}
+
+func TestLoadProjectRulesMissingDir(t *testing.T) {
+	if got := config.LoadProjectRules(t.TempDir()); got != "" {
+		t.Fatalf("missing .solcode should be empty, got %q", got)
+	}
+	if got := config.LoadProjectRules(""); got != "" {
+		t.Fatalf("empty workDir should be empty, got %q", got)
+	}
+}

@@ -20,6 +20,9 @@ type SkillInfo struct {
 
 type ContextBuilder struct {
 	SystemPrompt string
+	// ProjectRules are project-only instructions from <workDir>/.solcode,
+	// injected into the system prompt at startup.
+	ProjectRules string
 	// Skills lists available skills with short descriptions for discovery.
 	// Prefer this over SkillNames.
 	Skills []SkillInfo
@@ -362,6 +365,9 @@ func (b ContextBuilder) systemPrompt(workDir string) string {
 	parts = append(parts, defaultSystemPrompt())
 	parts = append(parts, toolUsagePrompt())
 	parts = append(parts, skillsPrompt(b.skillCatalog()))
+	if rules := strings.TrimSpace(b.ProjectRules); rules != "" {
+		parts = append(parts, rules)
+	}
 	if workDir != "" {
 		parts = append(parts, "Working directory: "+workDir)
 	}

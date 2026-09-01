@@ -1077,6 +1077,7 @@ func (a *App) estimateSessionContextTokens(ctx context.Context, current *session
 	messages := session.StripEphemeralContextMessages(current.CopyMessages())
 	builder := engine.ContextBuilder{
 		SystemPrompt: a.Config.SystemPrompt,
+		ProjectRules: config.FormatProjectRulesPrompt(config.LoadProjectRules(a.Config.WorkDir)),
 		Skills:       skillInfos(a.SkillRegistry),
 		SkillNames:   skillNames(a.SkillRegistry),
 		PlanMode:     a.Permissions != nil && a.Permissions.Mode() == permission.ModePlan,
@@ -2776,6 +2777,7 @@ func engineConfig(cfg config.Config, client *cpanthropic.Client, runtime *hook.R
 		MaxContextTokens: cfg.MaxContextTokens,
 		MaxTokens:        cfg.MaxTokens,
 		SystemPrompt:     cfg.SystemPrompt,
+		ProjectRules:     config.FormatProjectRulesPrompt(config.LoadProjectRules(cfg.WorkDir)),
 		Skills:           skillInfos(skillRegistry),
 		SkillNames:       skillNames(skillRegistry),
 		SkillRoots:       skillRoots(skillRegistry),

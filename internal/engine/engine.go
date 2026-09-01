@@ -54,6 +54,9 @@ type Config struct {
 	MaxContextTokens int64
 	MaxTokens        int64
 	SystemPrompt     string
+	// ProjectRules are project-only instructions loaded from
+	// <workDir>/.solcode (rules.md and rules/*.md) at startup.
+	ProjectRules     string
 	Skills           []SkillInfo
 	SkillNames       []string          // legacy; used only when Skills is empty
 	SkillRoots       []string          // absolute skill package roots for fallback path resolution
@@ -201,6 +204,7 @@ func (e *Engine) runMessagesLoop(ctx context.Context, runReq RunRequest) RunResu
 	executor := NewToolExecutorWithPermissions(e.config.Tools, e.config.Hooks, e.config.Permissions)
 	builder := ContextBuilder{
 		SystemPrompt: e.config.SystemPrompt,
+		ProjectRules: e.config.ProjectRules,
 		Skills:       e.config.Skills,
 		SkillNames:   e.config.SkillNames,
 		PlanMode:     e.config.Permissions != nil && e.config.Permissions.Mode() == permission.ModePlan,

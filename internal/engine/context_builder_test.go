@@ -80,3 +80,28 @@ func TestWithContextMessagesKeepsProjectSummaryAndLatestPromptOrder(t *testing.T
 		t.Fatalf("latest prompt = %q, want unchanged latest prompt", promptText)
 	}
 }
+
+func TestSystemPromptIncludesProjectRules(t *testing.T) {
+	builder := ContextBuilder{
+		ProjectRules: "Project rules:\nPrefer table-driven tests.",
+	}
+	got := builder.systemPrompt("/tmp/demo")
+	if !strings.Contains(got, "Prefer table-driven tests.") {
+		t.Fatalf("system prompt missing project rules: %q", got)
+	}
+	if !strings.Contains(got, "You are solcode") {
+		t.Fatalf("system prompt missing default agent instructions")
+	}
+	rulesAt := strings.Index(got, "Prefer table-driven tests.")
+	wdAt := strings.Index(got, "Working directory: /tmp/demo")
+	if rulesAt < 0 || wdAt < 0 || rulesAt > wdAt {
+		t.Fatalf("project rules should appear before working directory:\n%s", got)
+	}
+}
+
+func TestSystemPromptOmitsEmptyProjectRules(t *testing.T) {
+	got := (ContextBuilder{}).systemPrompt("")
+	if strings.Contains(got, "Project rules:") {
+		t.Fatalf("empty project rules leaked into system prompt: %q", got)
+	}
+}

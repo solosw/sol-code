@@ -10,6 +10,7 @@ import (
 	"time"
 
 	htmltomarkdown "github.com/JohannesKaufmann/html-to-markdown/v2"
+	"github.com/solosw/solcode/internal/httpproxy"
 )
 
 // FetchParams is the input schema for the fetch tool.
@@ -34,7 +35,7 @@ type fetchTool struct {
 // NewFetchTool creates a new URL fetch tool.
 func NewFetchTool() Tool {
 	return &fetchTool{
-		client: &http.Client{Timeout: DefaultFetchTimeout * time.Second},
+		client: httpproxy.NewClient(DefaultFetchTimeout * time.Second),
 	}
 }
 
@@ -95,7 +96,7 @@ func (f *fetchTool) Invoke(ctx context.Context, uctx *UseContext, input json.Raw
 		if params.Timeout > MaxFetchTimeout {
 			params.Timeout = MaxFetchTimeout
 		}
-		client = &http.Client{Timeout: time.Duration(params.Timeout) * time.Second}
+		client = httpproxy.NewClient(time.Duration(params.Timeout) * time.Second)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "GET", params.URL, nil)

@@ -21,6 +21,7 @@ import (
 	"github.com/solosw/solcode/internal/app"
 	"github.com/solosw/solcode/internal/config"
 	"github.com/solosw/solcode/internal/engine"
+	"github.com/solosw/solcode/internal/httpproxy"
 	"github.com/solosw/solcode/internal/permission"
 	"github.com/solosw/solcode/internal/session"
 	"github.com/solosw/solcode/internal/skill"
@@ -439,6 +440,8 @@ func runInteractive(cfg config.Config, configPath string, timeout time.Duration,
 			return handleSessionsCommand(&cfg, application)
 		case "workflows":
 			return handleWorkflowsCommand(application)
+		case "proxy":
+			return handleProxyCommand(&cfg, application, args, persistencePath)
 		default:
 			return fmt.Sprintf("Unknown command: /%s. Try /help.", command)
 		}
@@ -1073,6 +1076,25 @@ func handleEffortSwitch(cfg *config.Config, application *app.App, effort, persis
 	message := fmt.Sprintf("Switched effort to %s.", effort)
 	if err := config.SaveLocalOverrides(persistencePath, map[string]any{"effort": effort}); err != nil {
 		message += fmt.Sprintf("\nWarning: could not persist effort selection: %v", err)
+	}
+	return message
+}
+
+func handleProxyCommand(cfg *config.Config, application *app.App, args, persistencePath string) string {
+	proxyCfg, message, err := httpproxy.ApplyCommand(args)
+	if err != nil {
+		return fmt.Sprintf("Could not update proxy: %v", err)
+	}
+	if cfg != nil {
+		cfg.Proxy = proxyCfg
+	}
+	if application != nil {
+		application.Config.Proxy = proxyCfg
+	}
+	if strings.TrimSpace(args) != "" {
+		if err := config.SaveLocalOverrides(persistencePath, httpproxy.PersistMap(proxyCfg)); err != nil {
+			message += fmt.Sprintf("\nWarning: could not persist proxy settings: %v", err)
+		}
 	}
 	return message
 }

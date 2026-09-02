@@ -49,6 +49,7 @@ func sampleTools() []tool.Tool {
 		&stubTool{name: tool.BashToolName, desc: "run shell commands"},
 		&stubTool{name: tool.EditToolName, desc: "edit files by replacing text"},
 		&stubTool{name: tool.ViewToolName, desc: "read files"},
+		&stubTool{name: tool.WaitToolName, desc: "wait for background bash jobs"},
 		&stubTool{name: tool.WriteToolName, desc: "write files"},
 		&stubTool{name: tool.ToolSearchToolName, desc: "search tools"},
 		&stubTool{name: tool.GlobToolName, desc: "find files by pattern"},
@@ -82,11 +83,28 @@ func TestSelectToolsForTurnCoreOnlyByDefault(t *testing.T) {
 	if !got[tool.BashToolName] || !got[tool.EditToolName] || !got[tool.ToolSearchToolName] {
 		t.Fatalf("core tools missing: %#v", got)
 	}
+	if got[tool.WaitToolName] {
+		t.Fatalf("Wait must not be model-visible: %#v", got)
+	}
 	if got["mcp__docs__query"] || got["mcp__office__cli"] || got["WebSearch"] {
 		t.Fatalf("dynamic tools should be omitted without query: %#v", got)
 	}
 	if len(selected) > 16 {
 		t.Fatalf("selected too many tools: %d", len(selected))
+	}
+}
+
+func TestSelectToolsDoesNotSurfaceWait(t *testing.T) {
+	selected := SelectToolsForTurn(sampleTools(), nil, "wait for background bash jobs", map[string]bool{tool.WaitToolName: true})
+	got := namesOf(selected)
+	if got[tool.WaitToolName] {
+		t.Fatalf("Wait must stay hidden (query+sticky): %#v", got)
+	}
+	// Explicit whitelist also cannot expose Wait to the model.
+	selected = SelectToolsForTurn(sampleTools(), []string{tool.BashToolName, tool.WaitToolName}, "", nil)
+	got = namesOf(selected)
+	if got[tool.WaitToolName] || !got[tool.BashToolName] {
+		t.Fatalf("whitelist should drop Wait only: %#v", got)
 	}
 }
 

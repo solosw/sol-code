@@ -16,6 +16,25 @@ func TestSlashHelpListsStatus(t *testing.T) {
 	}
 }
 
+func TestBuiltinIncludesProxy(t *testing.T) {
+	if !isBuiltinSlashCommand("proxy") {
+		t.Fatal("proxy should be a builtin slash command")
+	}
+	if !strings.Contains(slashHelpText(), "/proxy") {
+		t.Fatal("help should list /proxy")
+	}
+	found := false
+	for _, cmd := range availableCommands() {
+		if cmd.Name == "proxy" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("availableCommands missing proxy")
+	}
+}
+
 func TestBuiltinIncludesStatus(t *testing.T) {
 	if !isBuiltinSlashCommand("status") {
 		t.Fatal("status should be a builtin slash command")
@@ -82,6 +101,7 @@ func TestSlashStatusFormatsUsage(t *testing.T) {
 		"Effort: high",
 		"Session: main",
 		"Workdir: /work",
+		"Proxy:",
 		"Context:",
 		"Cache:",
 		"read 4k",

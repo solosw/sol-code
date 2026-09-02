@@ -43,14 +43,26 @@ func DefaultShell() ShellRunner {
 type BashParams struct {
 	Command string `json:"command"`
 	Timeout int    `json:"timeout,omitempty"`
+	// RunInBackground is retained for tests/compat only; it is not part of the
+	// model-facing schema. Long runs use timeout > AutoWaitThresholdMs instead.
+	RunInBackground bool `json:"run_in_background,omitempty"`
 }
 
 const (
-	BashToolName    = "Bash"
-	DefaultTimeout  = 60_000  // 1 minute in milliseconds
-	MaxTimeout      = 600_000 // 10 minutes in milliseconds
-	MaxOutputLength = 30_000
+	BashToolName = "Bash"
+	// DefaultTimeout is used when the model omits timeout (1 minute).
+	DefaultTimeout = 60_000
+	// MaxTimeout caps a single Bash invocation / background job lifetime (24h).
+	MaxTimeout = 86_400_000
+	// AutoWaitThresholdMs: timeouts above this run as a background job and the
+	// tool call blocks (waits) until the job finishes or the timeout elapses.
+	// The model never sees a separate Wait tool — duration equals Bash timeout.
+	AutoWaitThresholdMs = 180_000 // 3 minutes
+	MaxOutputLength     = 30_000
 )
+
+// autoWaitThresholdMs is the effective threshold (overridable in tests).
+var autoWaitThresholdMs = AutoWaitThresholdMs
 
 // bannedCommands are blocked for security.
 var bannedCommands = []string{
@@ -63,6 +75,7 @@ type bashTool struct {
 	BaseTool
 	shell         ShellRunner
 	sandboxPolicy sandbox.Policy
+	jobs          *BackgroundJobs
 }
 
 // NewBashTool creates a new bash execution tool.
@@ -72,12 +85,23 @@ func NewBashTool() Tool {
 
 // NewBashToolWithShell creates a new bash execution tool with a custom ShellRunner.
 func NewBashToolWithShell(shell ShellRunner) Tool {
-	return &bashTool{shell: shell}
+	return &bashTool{shell: shell, jobs: DefaultBackgroundJobs()}
 }
 
 // NewBashToolWithSandbox creates a Bash tool that applies policy to each command.
 func NewBashToolWithSandbox(policy sandbox.Policy) Tool {
-	return &bashTool{shell: DefaultShell(), sandboxPolicy: policy}
+	return &bashTool{shell: DefaultShell(), sandboxPolicy: policy, jobs: DefaultBackgroundJobs()}
+}
+
+// NewBashToolWithJobs creates a Bash tool bound to a specific background registry (tests).
+func NewBashToolWithJobs(shell ShellRunner, jobs *BackgroundJobs) Tool {
+	if shell == nil {
+		shell = DefaultShell()
+	}
+	if jobs == nil {
+		jobs = DefaultBackgroundJobs()
+	}
+	return &bashTool{shell: shell, jobs: jobs}
 }
 
 func (b *bashTool) Name() string                             { return BashToolName }
@@ -92,7 +116,11 @@ Security: some commands are banned: %s.
 Output is truncated at %d characters.
 - Use ';' or '&&' to chain commands, do NOT use newlines.
 - Avoid find/grep/cat/head/tail — use Glob, Grep, and View tools instead.
-- Timeout in milliseconds (max %d).`, bannedStr, MaxOutputLength, MaxTimeout)
+- Timeout in milliseconds (max %d = 24h). Default %d (1m).
+- When timeout is greater than %d (3m), the command is tracked as a background job
+  and this tool call blocks until it finishes or the timeout elapses (wait duration
+  equals the timeout, up to 24h). No separate Wait tool is required or available.`,
+		bannedStr, MaxOutputLength, MaxTimeout, DefaultTimeout, AutoWaitThresholdMs)
 }
 
 func (b *bashTool) InputSchema() map[string]any {
@@ -104,8 +132,11 @@ func (b *bashTool) InputSchema() map[string]any {
 				"description": "The bash command to execute",
 			},
 			"timeout": map[string]any{
-				"type":        "integer",
-				"description": "Optional timeout in milliseconds (max 600000)",
+				"type": "integer",
+				"description": fmt.Sprintf(
+					"Optional timeout in milliseconds (default %d, max %d = 24h). Values above %d (3m) auto-wait for the full timeout.",
+					DefaultTimeout, MaxTimeout, AutoWaitThresholdMs,
+				),
 			},
 		},
 		"required": []string{"command"},
@@ -129,23 +160,78 @@ func (b *bashTool) Invoke(ctx context.Context, uctx *UseContext, input json.RawM
 		params.Timeout = MaxTimeout
 	}
 
-	baseCmd := strings.Fields(params.Command)[0]
+	fields := strings.Fields(params.Command)
+	if len(fields) == 0 {
+		return ErrorResult("command is required"), nil
+	}
+	baseCmd := fields[0]
 	for _, banned := range bannedCommands {
 		if strings.EqualFold(baseCmd, banned) {
 			return ErrorResult(fmt.Sprintf("command '%s' is not allowed", baseCmd)), nil
 		}
 	}
 
+	workDir := ""
+	if uctx != nil {
+		workDir = uctx.WorkDir
+	}
 	timeout := time.Duration(params.Timeout) * time.Millisecond
+
+	// Long timeouts (and legacy run_in_background) track the process as a
+	// background job and block this tool call for the same duration — Wait is
+	// not model-visible; Bash itself suspends until the job finishes.
+	if params.Timeout > autoWaitThresholdMs || params.RunInBackground {
+		return b.invokeBackgroundAndWait(ctx, params.Command, workDir, timeout)
+	}
+
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	startTime := time.Now()
-	stdout, stderr, exitCode, execErr := b.runCommand(execCtx, params.Command, uctx.WorkDir)
-	elapsed := time.Since(startTime)
+	var stdoutBuf, stderrBuf safeBuffer
+	exitCode, execErr := b.runCommandTo(execCtx, params.Command, workDir, &stdoutBuf, &stderrBuf)
+	return formatCommandResult(stdoutBuf.String(), stderrBuf.String(), exitCode, execErr, execCtx.Err() == context.DeadlineExceeded), nil
+}
 
-	stdout = TruncateOutput(stdout, MaxOutputLength)
-	stderr = TruncateOutput(stderr, MaxOutputLength)
+// invokeBackgroundAndWait starts the command under BackgroundJobs and blocks
+// until it finishes. Wait duration equals the job timeout (capped at MaxTimeout).
+func (b *bashTool) invokeBackgroundAndWait(ctx context.Context, command, workDir string, timeout time.Duration) (*ContentBlock, error) {
+	jobs := b.jobs
+	if jobs == nil {
+		jobs = DefaultBackgroundJobs()
+	}
+	if timeout <= 0 {
+		timeout = time.Duration(DefaultTimeout) * time.Millisecond
+	}
+	if timeout > time.Duration(MaxTimeout)*time.Millisecond {
+		timeout = time.Duration(MaxTimeout) * time.Millisecond
+	}
+
+	id := jobs.Start(command, workDir, timeout, func(jobCtx context.Context, stdout, stderr *safeBuffer) (int, error) {
+		return b.runCommandTo(jobCtx, command, workDir, stdout, stderr)
+	})
+
+	// Bound the wait by the same lifetime as the job; timeout<=0 on Wait would
+	// also work under a child ctx, but an explicit bound matches "wait = timeout".
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	snap, err := jobs.Wait(waitCtx, id, timeout)
+	if err != nil && err != errWaitTimeout && waitCtx.Err() == nil && !isUnknownJob(err) {
+		return ErrorResult(err.Error()), nil
+	}
+
+	text := formatJobSnapshot(snap)
+	if err == errWaitTimeout || (snap.Status == JobRunning && waitCtx.Err() == context.DeadlineExceeded) {
+		text = fmt.Sprintf("Command still running after %s (bash timeout).\n\n%s", timeout.Round(time.Second), text)
+	} else if waitCtx.Err() != nil && snap.Status == JobRunning {
+		text = fmt.Sprintf("Wait canceled.\n\n%s", text)
+	}
+	isErr := snap.Status == JobFailed || snap.Status == JobTimedOut || snap.Status == JobCanceled
+	return &ContentBlock{Type: "text", Text: text, IsError: isErr}, nil
+}
+
+func formatCommandResult(stdoutRaw, stderrRaw string, exitCode int, execErr error, timedOut bool) *ContentBlock {
+	stdout := TruncateOutput(stdoutRaw, MaxOutputLength)
+	stderr := TruncateOutput(stderrRaw, MaxOutputLength)
 
 	var result strings.Builder
 	if stdout != "" {
@@ -156,7 +242,7 @@ func (b *bashTool) Invoke(ctx context.Context, uctx *UseContext, input json.RawM
 	if stderr != "" {
 		errs = append(errs, stderr)
 	}
-	if execCtx.Err() == context.DeadlineExceeded {
+	if timedOut {
 		errs = append(errs, "Command timed out")
 	} else if execErr != nil {
 		errs = append(errs, execErr.Error())
@@ -176,54 +262,63 @@ func (b *bashTool) Invoke(ctx context.Context, uctx *UseContext, input json.RawM
 		output = "no output"
 	}
 
-	_ = elapsed // duration tracked but returned implicitly in output
-
 	return &ContentBlock{
 		Type:    "text",
 		Text:    output,
-		IsError: exitCode != 0 || execErr != nil,
-	}, nil
+		IsError: exitCode != 0 || execErr != nil || timedOut,
+	}
 }
 
-// runCommand executes a command via the configured ShellRunner.
-func (b *bashTool) runCommand(ctx context.Context, command, workDir string) (string, string, int, error) {
+// runCommandTo executes a command via the configured ShellRunner, streaming
+// output into the provided writers (may be nil).
+func (b *bashTool) runCommandTo(ctx context.Context, command, workDir string, stdoutW, stderrW *safeBuffer) (int, error) {
 	shell := b.shell
 	if shell == nil {
 		shell = DefaultShell()
+	}
+	if stdoutW == nil {
+		stdoutW = &safeBuffer{}
+	}
+	if stderrW == nil {
+		stderrW = &safeBuffer{}
 	}
 
 	if b.sandboxPolicy.Enabled {
 		sandboxInstance, err := sandbox.NewWithPolicy(workDir, b.sandboxPolicy)
 		if err != nil {
-			return "", "", 0, err
+			return 0, err
 		}
 		program, args := shellCommand(shell, command)
 		result, err := sandboxInstance.Run(ctx, sandbox.Command{
 			Program: program,
 			Args:    args,
 		})
-		return result.Stdout, result.Stderr, result.ExitCode, err
+		if result.Stdout != "" {
+			_, _ = stdoutW.Write([]byte(result.Stdout))
+		}
+		if result.Stderr != "" {
+			_, _ = stderrW.Write([]byte(result.Stderr))
+		}
+		return result.ExitCode, err
 	}
 
 	cmd := shell.Command(ctx, command)
 	cmd.Dir = workDir
 	configureCommandCancellation(cmd)
-
-	var stdout, stderr strings.Builder
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
 
 	err := cmd.Run()
 	exitCode := 0
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
 			exitCode = ee.ExitCode()
+			err = nil
 		} else {
-			return stdout.String(), stderr.String(), exitCode, err
+			return exitCode, err
 		}
 	}
-
-	return stdout.String(), stderr.String(), exitCode, nil
+	return exitCode, nil
 }
 
 func shellCommand(shell ShellRunner, command string) (string, []string) {

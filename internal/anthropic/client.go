@@ -15,6 +15,7 @@ import (
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/solosw/solcode/internal/httpproxy"
 )
 
 const DefaultModel = "claude-opus-4-8"
@@ -62,7 +63,7 @@ func NewClient(opts Options) *Client {
 		format:  format,
 		apiKey:  opts.APIKey,
 		baseURL: strings.TrimRight(strings.TrimSpace(opts.BaseURL), "/"),
-		http:    &http.Client{Timeout: 0}, // stream can be long-lived
+		http:    httpproxy.NewClient(0), // stream can be long-lived; proxy-aware
 	}
 }
 
@@ -373,7 +374,7 @@ func decodeAnthropicStream(body io.Reader, req MessageRequest) (*sdk.Message, er
 // idleHTTPTimeout is only used for non-stream OpenAI requests.
 func (c *Client) idleHTTPClient() *http.Client {
 	if c == nil || c.http == nil {
-		return &http.Client{Timeout: 10 * time.Minute}
+		return httpproxy.NewClient(10 * time.Minute)
 	}
 	return &http.Client{Timeout: 10 * time.Minute, Transport: c.http.Transport}
 }

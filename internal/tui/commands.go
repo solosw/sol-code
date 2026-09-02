@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/solosw/solcode/internal/httpproxy"
 )
 
 type SlashCommandHandler func(command, args string) string
@@ -74,6 +75,7 @@ func slashHelpText() string {
 		"/new-session [name] — create and switch to a new session",
 		"/skills — browse skills and toggle enabled/disabled",
 		"/mcp — browse MCP servers and toggle enabled/disabled",
+		"/proxy [url|on|off|clear] — show or set HTTP(S) proxy",
 		"/goal [description] — work from goal.md until complete",
 		"/workflows — list loaded workflows (explicit Task graphs)",
 		"/workflow <name> [args] — run workflow; /[name]-workflow is its shortcut",
@@ -164,6 +166,12 @@ func (m *Model) handleSlashCommand(input string) (bool, tea.Cmd) {
 			m.appendCommandResult("/mcp is not available in this session.")
 		} else {
 			m.ShowDialog(DialogMCP)
+		}
+	case "proxy":
+		if m.slashHandler == nil {
+			m.appendCommandResult("/proxy is not available in this session.")
+		} else {
+			m.appendCommandResult(m.slashHandler(cmd.Name, cmd.Args))
 		}
 	case "compact":
 		if m.slashAsyncHandler == nil {
@@ -275,6 +283,8 @@ func (m *Model) slashStatusText() string {
 	if cwd := strings.TrimSpace(m.cwd); cwd != "" {
 		lines = append(lines, fmt.Sprintf("Workdir: %s", cwd))
 	}
+	// Prefer live process proxy state so /proxy takes effect immediately in /status.
+	lines = append(lines, proxyStatusForTUI())
 	lines = append(lines,
 		fmt.Sprintf("Context: %s / %s (%s)", compactTokens(used), renderContextLimit(limit), tokenSharePercent(used, limit)),
 		fmt.Sprintf("Cache: %s / %s input-side (%s) — read %s, write %s",
@@ -393,6 +403,7 @@ var builtinCommands = map[string]bool{
 	"new-session":   true,
 	"skills":        true,
 	"mcp":           true,
+	"proxy":         true,
 	"goal":          true,
 	"workflows":     true,
 	"workflow":      true,
@@ -414,6 +425,10 @@ func (m *Model) appendCommandResult(content string) {
 		content = "(no output)"
 	}
 	m.messages = append(m.messages, m.systemMessage(content))
+}
+
+func proxyStatusForTUI() string {
+	return httpproxy.StatusLine(httpproxy.Get())
 }
 
 func (m *Model) applySelectResult(result SelectResult) {

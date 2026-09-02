@@ -124,6 +124,10 @@ func SearchCapabilities(registry *Registry, skills *skill.Registry, input json.R
 				if candidate.Name() == ToolSearchToolName {
 					continue
 				}
+				if candidate.Name() == WaitToolName {
+					// Wait is internal: Bash timeout > 3m auto-waits.
+					continue
+				}
 				score := capabilityScore(query, candidate.Name(), candidate.Description())
 				if score > 0 {
 					matches = append(matches, CapabilityMatch{

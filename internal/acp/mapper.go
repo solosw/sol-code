@@ -470,6 +470,7 @@ func availableCommands() []AvailableCommand {
 		{Name: "new-session", Description: "Create and switch to a new session", Input: &AvailableCommandInput{Hint: "optional name"}},
 		{Name: "skills", Description: "Browse skills and toggle enabled/disabled"},
 		{Name: "mcp", Description: "Browse MCP servers and toggle enabled/disabled"},
+		{Name: "proxy", Description: "Show or set HTTP(S) proxy", Input: &AvailableCommandInput{Hint: "url | on | off | clear"}},
 		{Name: "goal", Description: "Work from goal.md until complete", Input: &AvailableCommandInput{Hint: "optional description"}},
 		{Name: "workflows", Description: "List loaded workflows"},
 	}

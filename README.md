@@ -11,7 +11,7 @@ A terminal-based coding agent powered by Claude (Anthropic API) that can read, w
 - **ACP (Agent Client Protocol)** — Speak JSON-RPC over stdio with `solcode --acp` (or `solcode acp`) so editors like Zed can drive the same agent loop as the TUI. Supports streaming updates, permissions, cancel, session modes/load, tool-call diffs, ACP `plan` updates from `TodoWrite`, and capability-gated client `fs/read_text_file` / `fs/write_text_file`.
 - **Multi-model support** — Configure multiple LLM providers and models, switch at runtime with `/model` (current provider only) and `/provider`, or add them directly from their dialogs.
 - **Native Anthropic transport** — The Anthropic Messages API uses a handwritten HTTP/JSON/SSE client, including streaming text, thinking, and tool-input deltas; the official SDK remains only for internal message compatibility.
-- **20+ built-in tools** — Bash, Edit, Write, View, ViewImage, Grep, Glob, LS, Diff, Patch, Fetch, WebSearch, LSP, MCP, TodoWrite, WriteMemory, ReadMemory, AskUser, Task (sub-agents), and more.
+- **20+ built-in tools** — Bash (timeouts above 3m auto-wait up to 24h), Edit, Write, View, ViewImage, Grep, Glob, LS, Diff, Patch, Fetch, WebSearch, LSP, MCP, TodoWrite, WriteMemory, ReadMemory, AskUser, Task (sub-agents), and more.
 - **MCP (Model Context Protocol)** — Connect to external MCP servers over stdio or HTTP.
 - **Custom skills** — Define reusable skill files loaded from configurable directories.
 - **Project rules** — Markdown instructions in `<project>/.solcode/rules.md` and `.solcode/rules/*.md` are injected into the system prompt at startup.
@@ -236,6 +236,7 @@ Type `/` in the input to access commands:
 | `/new-session [name]` | Create and switch to a new session |
 | `/skills` | Browse skills and toggle enabled/disabled |
 | `/mcp` | Browse MCP servers and toggle enabled/disabled |
+| `/proxy [url|on|off|clear]` | Show or set the HTTP(S) proxy used for API/Fetch/MCP requests |
 | `/[skill] [args]` | Invoke a loaded skill by name |
 
 ### Add a provider or model from the TUI

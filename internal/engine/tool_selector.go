@@ -34,6 +34,12 @@ var coreToolNames = map[string]bool{
 	tool.ReadMemoryToolName:  true,
 }
 
+// hiddenFromModel tools stay registered for execution/tests but are never
+// exposed on the model tool list (including ToolSearch sticky enable).
+var hiddenFromModel = map[string]bool{
+	tool.WaitToolName: true, // Bash timeout > 3m auto-waits; Wait is internal
+}
+
 // SelectToolsForTurn keeps the full registry available for execution and
 // discovery, but returns only a compact core plus live matches for the model
 // request. Matching uses current tool metadata only, so dynamically connected
@@ -42,20 +48,27 @@ var coreToolNames = map[string]bool{
 // allowed semantics match Registry.Filter for non-empty whitelists: a non-empty
 // allowed list is treated as an explicit restriction (for example Task
 // sub-agents). nil or empty allowed enables dynamic routing over all tools.
+// Wait is never model-visible (see hiddenFromModel).
 func SelectToolsForTurn(all []tool.Tool, allowed []string, query string, enabled map[string]bool) []tool.Tool {
 	if len(allowed) > 0 {
 		return filterTools(all, allowed)
 	}
 	selected := make(map[string]bool)
 	for _, candidate := range all {
-		if coreToolNames[candidate.Name()] {
-			selected[candidate.Name()] = true
+		name := candidate.Name()
+		if hiddenFromModel[name] {
+			continue
+		}
+		if coreToolNames[name] {
+			selected[name] = true
 		}
 	}
 	for name := range enabled {
-		if strings.TrimSpace(name) != "" {
-			selected[name] = true
+		name = strings.TrimSpace(name)
+		if name == "" || hiddenFromModel[name] {
+			continue
 		}
+		selected[name] = true
 	}
 
 	type scoredTool struct {
@@ -64,10 +77,11 @@ func SelectToolsForTurn(all []tool.Tool, allowed []string, query string, enabled
 	}
 	matches := make([]scoredTool, 0)
 	for _, candidate := range all {
-		if selected[candidate.Name()] {
+		name := candidate.Name()
+		if selected[name] || hiddenFromModel[name] {
 			continue
 		}
-		score := tool.CapabilityScore(query, candidate.Name(), candidate.Description())
+		score := tool.CapabilityScore(query, name, candidate.Description())
 		if score > 0 {
 			matches = append(matches, scoredTool{tool: candidate, score: score})
 		}
@@ -95,13 +109,15 @@ func filterTools(all []tool.Tool, allowed []string) []tool.Tool {
 	allowedNames := make(map[string]bool, len(allowed))
 	for _, name := range allowed {
 		name = strings.TrimSpace(name)
-		if name == "" {
+		if name == "" || hiddenFromModel[name] {
 			continue
 		}
 		allowedNames[name] = true
 	}
 	if len(allowedNames) == 0 {
-		return append([]tool.Tool(nil), all...)
+		// Unrestricted empty allowed is handled by the caller; here it means
+		// the whitelist only contained hidden names.
+		return nil
 	}
 	out := make([]tool.Tool, 0, len(allowedNames))
 	for _, candidate := range all {
@@ -149,6 +165,9 @@ func enableToolsFromSearch(all []tool.Tool, input []byte, enabled map[string]boo
 	}
 	for _, match := range matches {
 		if match.Kind != "tool" {
+			continue
+		}
+		if hiddenFromModel[match.Name] {
 			continue
 		}
 		enabled[match.Name] = true

@@ -2846,6 +2846,7 @@ func registerBuiltins(registry *tool.Registry, lspManager *lsp.Manager, sandboxP
 		tool.NewTodoWriteTool(),
 		tool.NewViewImageTool(),
 		tool.NewViewTool(),
+		tool.NewWaitTool(),
 		tool.NewWebSearchTool(),
 		tool.NewWriteTool(),
 	}

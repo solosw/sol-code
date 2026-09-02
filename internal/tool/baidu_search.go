@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/solosw/solcode/internal/httpproxy"
 )
 
 const baiduJSONSearchURL = "https://www.baidu.com/s"
@@ -61,7 +63,7 @@ type baiduJSONResponse struct {
 
 func newBaiduJSONSearcher(client *http.Client) *baiduJSONSearcher {
 	if client == nil {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = httpproxy.NewClient(10 * time.Second)
 	}
 	return &baiduJSONSearcher{
 		client:  client,

@@ -66,6 +66,25 @@ func TestLoadTUIThemeSettings(t *testing.T) {
 	}
 }
 
+
+func TestLoadProxySettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.json")
+	writeFile(t, path, `{
+		"proxy": {
+			"url": "http://127.0.0.1:7890",
+			"enabled": true
+		}
+	}`)
+
+	cfg, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("Load() = %v", err)
+	}
+	if !cfg.Proxy.Enabled || cfg.Proxy.URL != "http://127.0.0.1:7890" {
+		t.Fatalf("Proxy = %+v", cfg.Proxy)
+	}
+}
+
 func TestLoadCreatesDefaultSettingsOnFirstStart(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	project := filepath.Join(t.TempDir(), "project")

@@ -10,6 +10,7 @@ import (
 
 	"github.com/solosw/solcode/internal/anthropic"
 	"github.com/solosw/solcode/internal/hook"
+	"github.com/solosw/solcode/internal/httpproxy"
 	"github.com/solosw/solcode/internal/permission"
 	"github.com/solosw/solcode/internal/sandbox"
 )
@@ -149,6 +150,8 @@ type Config struct {
 	Memory           MemoryConfig         `json:"memory,omitempty"`
 	KnowledgeGraph   KnowledgeGraphConfig `json:"knowledge_graph,omitempty"`
 	Sandbox          sandbox.Policy       `json:"sandbox,omitempty"`
+	// Proxy configures outbound HTTP(S) traffic for API, Fetch, MCP HTTP, etc.
+	Proxy httpproxy.Config `json:"proxy,omitempty"`
 
 	Provider  string           `json:"provider,omitempty"`
 	Providers []ProviderConfig `json:"providers,omitempty"`
@@ -415,6 +418,12 @@ func defaultSettingsPayload(workDir string) map[string]any {
 
 func (cfg *Config) Normalize() error {
 	cfg.APIFormat = anthropic.NormalizeFormat(cfg.APIFormat)
+	cfg.Proxy.URL = strings.TrimSpace(cfg.Proxy.URL)
+	if cfg.Proxy.URL == "" {
+		cfg.Proxy.Enabled = false
+	}
+	// Apply process-wide so all outbound HTTP clients pick up settings.json / runtime overrides.
+	httpproxy.Apply(cfg.Proxy)
 	cfg.PermissionMode = permission.NormalizeMode(cfg.PermissionMode)
 	cfg.Permissions.Mode = permission.NormalizeMode(cfg.Permissions.Mode)
 	if cfg.Permissions.Mode == "" {
@@ -1022,6 +1031,10 @@ func applyJSONConfig(cfg *Config, data []byte) error {
 			}
 		case "base_url":
 			if err := json.Unmarshal(value, &cfg.BaseURL); err != nil {
+				return err
+			}
+		case "proxy":
+			if err := json.Unmarshal(value, &cfg.Proxy); err != nil {
 				return err
 			}
 		case "model":

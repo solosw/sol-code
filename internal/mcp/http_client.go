@@ -9,6 +9,7 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/solosw/solcode/internal/config"
+	"github.com/solosw/solcode/internal/httpproxy"
 	"github.com/solosw/solcode/internal/tool"
 )
 
@@ -177,10 +178,11 @@ func (r *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 }
 
 func newHeaderHTTPClient(headers map[string]string) *http.Client {
+	base := httpproxy.Transport()
 	if len(headers) == 0 {
-		return nil
+		return &http.Client{Timeout: defaultMCPHTTPTimeout, Transport: base}
 	}
-	return &http.Client{Timeout: defaultMCPHTTPTimeout, Transport: &headerRoundTripper{base: http.DefaultTransport, headers: headers}}
+	return &http.Client{Timeout: defaultMCPHTTPTimeout, Transport: &headerRoundTripper{base: base, headers: headers}}
 }
 
 func NewTestHeaderRoundTripper(base http.RoundTripper, headers map[string]string) http.RoundTripper {

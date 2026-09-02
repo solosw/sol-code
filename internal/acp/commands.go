@@ -9,6 +9,7 @@ import (
 	"github.com/solosw/solcode/internal/app"
 	"github.com/solosw/solcode/internal/config"
 	"github.com/solosw/solcode/internal/engine"
+	"github.com/solosw/solcode/internal/httpproxy"
 	"github.com/solosw/solcode/internal/session"
 	"github.com/solosw/solcode/internal/skill"
 )
@@ -73,6 +74,7 @@ func slashHelpText() string {
 		"/new-session [name] — create and switch to a new session",
 		"/skills — browse skills and toggle enabled/disabled",
 		"/mcp — browse MCP servers and toggle enabled/disabled",
+		"/proxy [url|on|off|clear] — show or set HTTP(S) proxy",
 		"/goal [description] — work from goal.md until complete",
 		"/workflows — list loaded workflows",
 	}, "\n")
@@ -152,6 +154,10 @@ func (s *Server) handleSlashCommand(ctx context.Context, sess *acpSession, input
 		}
 		s.emitText(sess, "agent_message_chunk", msg)
 		return true, StopReasonEndTurn, nil
+	case "proxy":
+		msg := s.slashProxy(sess, cmd.Args, persistencePath)
+		s.emitText(sess, "agent_message_chunk", msg)
+		return true, StopReasonEndTurn, nil
 	case "compact":
 		msg, err := s.slashCompact(ctx, sess)
 		if err != nil {
@@ -202,7 +208,7 @@ func (s *Server) handleSlashCommand(ctx context.Context, sess *acpSession, input
 func isBuiltinSlashCommand(name string) bool {
 	switch name {
 	case "help", "status", "clear", "model", "provider", "effort", "sessions", "compact",
-		"fix-session", "new-session", "skills", "mcp", "goal", "workflows",
+		"fix-session", "new-session", "skills", "mcp", "proxy", "goal", "workflows",
 		"workflow", "workflow-edit", "web-ui":
 		return true
 	default:
@@ -459,6 +465,7 @@ func (s *Server) slashStatus(ctx context.Context, sess *acpSession) (string, err
 	if workDir != "" {
 		lines = append(lines, fmt.Sprintf("Workdir: %s", workDir))
 	}
+	lines = append(lines, proxyStatusLine())
 	lines = append(lines,
 		fmt.Sprintf("Context: %s / %s (%s)", compactStatusTokens(estimated), renderStatusLimit(maxCtx), statusSharePercent(estimated, maxCtx)),
 		fmt.Sprintf("Cache: %s / %s input-side (%s) — read %s, write %s",
@@ -472,6 +479,30 @@ func (s *Server) slashStatus(ctx context.Context, sess *acpSession) (string, err
 		fmt.Sprintf("Input: %s uncached (session total)", compactStatusTokens(maxInt64(0, input))),
 	)
 	return strings.Join(lines, "\n"), nil
+}
+
+func proxyStatusLine() string {
+	// Live process state so /proxy takes effect immediately in /status.
+	return httpproxy.StatusLine(httpproxy.Get())
+}
+
+func (s *Server) slashProxy(sess *acpSession, args, persistencePath string) string {
+	cfg, message, err := httpproxy.ApplyCommand(args)
+	if err != nil {
+		return fmt.Sprintf("Could not update proxy: %v", err)
+	}
+	if sess != nil {
+		sess.cfg.Proxy = cfg
+		if sess.application != nil {
+			sess.application.Config.Proxy = cfg
+		}
+	}
+	if strings.TrimSpace(args) != "" {
+		if err := config.SaveLocalOverrides(persistencePath, httpproxy.PersistMap(cfg)); err != nil {
+			message += fmt.Sprintf("\nWarning: could not persist proxy settings: %v", err)
+		}
+	}
+	return message
 }
 
 func statusInputSideTotal(inputTokens, cacheRead, cacheWrite int64) int64 {

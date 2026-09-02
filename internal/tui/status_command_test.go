@@ -24,6 +24,7 @@ func TestSlashStatusTextIncludesContextAndCache(t *testing.T) {
 		"Model: claude-sonnet",
 		"Mode: plan",
 		"Workdir: /tmp/proj",
+		"Proxy:",
 		"Context: 12.5k / 200k",
 		"Cache:",
 		"read 4k",
@@ -40,6 +41,15 @@ func TestSlashStatusTextIncludesContextAndCache(t *testing.T) {
 func TestSlashHelpListsStatus(t *testing.T) {
 	if !strings.Contains(slashHelpText(), "/status") {
 		t.Fatal("help should list /status")
+	}
+}
+
+func TestBuiltinIncludesProxy(t *testing.T) {
+	if !isBuiltinSlashCommand("proxy") {
+		t.Fatal("proxy should be a builtin slash command")
+	}
+	if !strings.Contains(slashHelpText(), "/proxy") {
+		t.Fatal("help should list /proxy")
 	}
 }
 

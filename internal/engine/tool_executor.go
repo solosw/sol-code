@@ -28,6 +28,9 @@ type ToolResult struct {
 const (
 	defaultToolTimeout = 2 * time.Minute
 	taskToolTimeout    = 30 * time.Minute
+	// bashToolTimeout is slightly above Bash MaxTimeout (24h) so the executor
+	// does not cancel a long auto-wait before the job's own lifetime ends.
+	bashToolTimeout = 24*time.Hour + 30*time.Second
 )
 
 type ToolExecutor struct {
@@ -48,10 +51,18 @@ func timeoutForTool(selected tool.Tool) time.Duration {
 	if selected == nil {
 		return defaultToolTimeout
 	}
-	if selected.Name() == tool.TaskToolName {
+	switch selected.Name() {
+	case tool.TaskToolName:
 		return taskToolTimeout
+	case tool.WaitToolName:
+		// Wait is internal (not model-visible); same ceiling as Bash auto-wait.
+		return bashToolTimeout
+	case tool.BashToolName:
+		// Foreground short runs and long auto-waits share MaxTimeout (24h).
+		return bashToolTimeout
+	default:
+		return defaultToolTimeout
 	}
-	return defaultToolTimeout
 }
 
 func (x *ToolExecutor) Execute(ctx context.Context, call ToolCall, env ToolEnv) ToolResult {

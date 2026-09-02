@@ -3,6 +3,7 @@ package tool
 import (
 	"context"
 	"encoding/json"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -177,6 +178,43 @@ func TestBackgroundJobCancel(t *testing.T) {
 	}
 	if snap.Status == JobCompleted && snap.Elapsed > 3*time.Second {
 		t.Fatalf("job appears to have run to completion despite cancel: %+v", snap)
+	}
+}
+
+func TestBashWaitsForContinuousStdoutUntilExit(t *testing.T) {
+	prev := autoWaitThresholdMs
+	autoWaitThresholdMs = 500
+	t.Cleanup(func() { autoWaitThresholdMs = prev })
+
+	dir := t.TempDir()
+	scriptPath := dir + string(os.PathSeparator) + "train.py"
+	script := "import time\nprint('start', flush=True)\ntime.sleep(2)\nprint('end', flush=True)\n"
+	if err := os.WriteFile(scriptPath, []byte(script), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	jobs := NewBackgroundJobs(4)
+	bash := NewBashToolWithJobs(DefaultShell(), jobs)
+	// Avoid strconv.Quote: cmd.exe keeps the quotes as part of the path.
+	command := "python " + scriptPath
+	input, _ := json.Marshal(map[string]any{
+		"command": command,
+		"timeout": 15_000, // auto-wait path
+	})
+	start := time.Now()
+	res, err := bash.Invoke(context.Background(), &UseContext{}, input)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.IsError {
+		t.Fatalf("failed: %s", res.Text)
+	}
+	if !strings.Contains(res.Text, "end") || !strings.Contains(res.Text, "status: completed") {
+		t.Fatalf("expected completed full output:\n%s", res.Text)
+	}
+	if elapsed < 1800*time.Millisecond {
+		t.Fatalf("returned too early (%s) — treated first stdout as completion?", elapsed)
 	}
 }
 

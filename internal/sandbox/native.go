@@ -114,9 +114,24 @@ func (s *Sandbox) unconfinedRun(ctx context.Context, cmd Command) (Result, error
 
 	var co cmdOutput
 	co.configure(c, cmd)
-	configureCommandCancellation(c)
+	guard := configureCommandCancellation(c)
 
-	err := c.Run()
+	if err := c.Start(); err != nil {
+		if guard != nil {
+			guard.Close()
+		}
+		return Result{}, fmt.Errorf("native sandbox (unconfined): %w", err)
+	}
+	if guard != nil {
+		guard.AfterStart(c.Process)
+		defer guard.Close()
+	}
+	err := c.Wait()
+	if guard != nil {
+		if waitErr := guard.WaitChildren(ctx); waitErr != nil && err == nil {
+			err = waitErr
+		}
+	}
 	result := resultForCommand(&co, c)
 	if err == nil {
 		return result, nil

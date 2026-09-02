@@ -3,6 +3,7 @@
 package sandbox
 
 import (
+	"context"
 	"errors"
 	"os"
 	"os/exec"
@@ -10,9 +11,22 @@ import (
 	"time"
 )
 
-func configureCommandCancellation(cmd *exec.Cmd) {
+type processGuard interface {
+	AfterStart(proc *os.Process)
+	WaitChildren(ctx context.Context) error
+	Close()
+}
+
+type unixProcessGuard struct{}
+
+func (unixProcessGuard) AfterStart(*os.Process)             {}
+func (unixProcessGuard) WaitChildren(context.Context) error { return nil }
+func (unixProcessGuard) Close()                             {}
+
+func configureCommandCancellation(cmd *exec.Cmd) processGuard {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
+		cmd.WaitDelay = 250 * time.Millisecond
 		if cmd.Process == nil {
 			return os.ErrProcessDone
 		}
@@ -24,5 +38,5 @@ func configureCommandCancellation(cmd *exec.Cmd) {
 		}
 		return nil
 	}
-	cmd.WaitDelay = 250 * time.Millisecond
+	return unixProcessGuard{}
 }

@@ -304,16 +304,39 @@ func (b *bashTool) runCommandTo(ctx context.Context, command, workDir string, st
 
 	cmd := shell.Command(ctx, command)
 	cmd.Dir = workDir
-	configureCommandCancellation(cmd)
+	guard := configureCommandCancellation(cmd)
 	cmd.Stdout = stdoutW
 	cmd.Stderr = stderrW
 
-	err := cmd.Run()
+	// Start+Wait (not Run) so we can attach platform process-tree guards
+	// before waiting. Completion is process-tree exit — not "first stdout".
+	if err := cmd.Start(); err != nil {
+		if guard != nil {
+			guard.Close()
+		}
+		return 0, err
+	}
+	if guard != nil {
+		guard.AfterStart(cmd.Process)
+		// Close only after WaitChildren so KILL_ON_JOB_CLOSE does not reap
+		// still-running children (python training, etc.) when cmd.exe exits.
+		defer guard.Close()
+	}
+	err := cmd.Wait()
+	// On Windows, cmd.exe may exit while python/etc. children keep running in
+	// the job. Block until the job is empty (or ctx cancels/times out).
+	if guard != nil {
+		if waitErr := guard.WaitChildren(ctx); waitErr != nil && err == nil {
+			err = waitErr
+		}
+	}
 	exitCode := 0
 	if err != nil {
 		if ee, ok := err.(*exec.ExitError); ok {
 			exitCode = ee.ExitCode()
 			err = nil
+		} else if ctx.Err() != nil {
+			return exitCode, err
 		} else {
 			return exitCode, err
 		}

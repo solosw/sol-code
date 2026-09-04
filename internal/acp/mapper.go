@@ -203,15 +203,14 @@ func sessionHistoryUpdates(s *session.Session) []SessionUpdate {
 				if toolResultIsError(block.OfToolResult) {
 					status = ToolCallFailed
 				}
+				toolContent, locations := toolOutputContent("", text, status == ToolCallFailed)
 				updates = append(updates, SessionUpdate{
 					SessionUpdate: "tool_call_update",
 					ToolCallID:    block.OfToolResult.ToolUseID,
 					Status:        status,
 					RawOutput:     output,
-					ToolContent: []ToolCallContent{{
-						Type:    "content",
-						Content: &ContentBlock{Type: "text", Text: text},
-					}},
+					ToolContent:   toolContent,
+					Locations:     locations,
 				})
 			}
 		}
@@ -241,7 +240,7 @@ func toolResultIsError(result *sdk.ToolResultBlockParam) bool {
 
 func toolKind(name string) string {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "read", "view", "glob", "grep", "ls":
+	case "read", "view", "glob", "grep", "ls", "viewimage":
 		return "read"
 	case "edit", "multiedit", "write", "multiwrite", "patch":
 		return "edit"
@@ -249,6 +248,8 @@ func toolKind(name string) string {
 		return "execute"
 	case "websearch", "fetch":
 		return "fetch"
+	case "imagegenerate", "imageedit":
+		return "other"
 	default:
 		return "other"
 	}

@@ -11,7 +11,7 @@ A terminal-based coding agent powered by Claude (Anthropic API) that can read, w
 - **ACP (Agent Client Protocol)** — Speak JSON-RPC over stdio with `solcode --acp` (or `solcode acp`) so editors like Zed can drive the same agent loop as the TUI. Supports streaming updates, permissions, cancel, session modes/load, tool-call diffs, ACP `plan` updates from `TodoWrite`, and capability-gated client `fs/read_text_file` / `fs/write_text_file`.
 - **Multi-model support** — Configure multiple LLM providers and models, switch at runtime with `/model` (current provider only) and `/provider`, or add them directly from their dialogs.
 - **Native Anthropic transport** — The Anthropic Messages API uses a handwritten HTTP/JSON/SSE client, including streaming text, thinking, and tool-input deltas; the official SDK remains only for internal message compatibility.
-- **20+ built-in tools** — Bash (timeouts above 3m auto-wait up to 24h), Edit, Write, View, ViewImage, Grep, Glob, LS, Diff, Patch, Fetch, WebSearch, LSP, MCP, TodoWrite, WriteMemory, ReadMemory, AskUser, Task (sub-agents), and more.
+- **20+ built-in tools** — Bash (timeouts above 3m auto-wait up to 24h), ImageGenerate / ImageEdit (optional OpenAI-format Images API, separately configurable), Edit, Write, View, ViewImage, Grep, Glob, LS, Diff, Patch, Fetch, WebSearch, LSP, MCP, TodoWrite, WriteMemory, ReadMemory, AskUser, Task (sub-agents), and more.
 - **MCP (Model Context Protocol)** — Connect to external MCP servers over stdio or HTTP.
 - **Custom skills** — Define reusable skill files loaded from configurable directories.
 - **Project rules** — Markdown instructions in `<project>/.solcode/rules.md` and `.solcode/rules/*.md` are injected into the system prompt at startup.
@@ -129,6 +129,26 @@ solcode [flags]
 | `-acp` | off | Run as an Agent Client Protocol server on stdio (mutually exclusive with `-prompt` / TUI) |
 
 Config auto-discovery looks for `~/.solcode/settings.json`, `~/.solcode/settings.local.json`, `./.solcode/settings.json`, and `./.solcode/settings.local.json` in order; later files merge on top.
+
+### Image generation / edit (optional)
+
+`ImageGenerate` and `ImageEdit` use an OpenAI-compatible Images API (`POST /v1/images/generations`, `POST /v1/images/edits`). Tools register only when `image.base_url` and `image.api_key` are set, independent of the chat provider:
+
+```json
+{
+  "image": {
+    "base_url": "https://api.openai.com",
+    "api_key_env": "OPENAI_API_KEY",
+    "model": "dall-e-3",
+    "edit_model": "dall-e-2",
+    "size": "1024x1024",
+    "timeout_sec": 120,
+    "output_dir": ".solcode/images"
+  }
+}
+```
+
+Env fallbacks: `OPENAI_API_KEY`, `OPENAI_IMAGE_BASE_URL` / `OPENAI_BASE_URL`. Use `"enabled": false` to hide tools. Default save dir: `<workdir>/.solcode/images/`.
 
 ### Project rules
 

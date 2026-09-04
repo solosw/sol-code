@@ -152,9 +152,38 @@ type Config struct {
 	Sandbox          sandbox.Policy       `json:"sandbox,omitempty"`
 	// Proxy configures outbound HTTP(S) traffic for API, Fetch, MCP HTTP, etc.
 	Proxy httpproxy.Config `json:"proxy,omitempty"`
+	// Image is an optional OpenAI-compatible Images API (generations + edits),
+	// configured independently from the chat provider.
+	Image ImageConfig `json:"image,omitempty"`
 
 	Provider  string           `json:"provider,omitempty"`
 	Providers []ProviderConfig `json:"providers,omitempty"`
+}
+
+// ImageConfig configures the OpenAI-format image generation/edit endpoints.
+// Leave empty (or Enabled=false) to hide ImageGenerate / ImageEdit tools.
+type ImageConfig struct {
+	// Enabled defaults to true when BaseURL and APIKey resolve; set false to disable.
+	Enabled *bool `json:"enabled,omitempty"`
+	// BaseURL is the API root, e.g. https://api.openai.com or a gateway origin.
+	// Requests go to {base_url}/v1/images/generations and .../edits (v1 is
+	// appended when missing).
+	BaseURL    string `json:"base_url,omitempty"`
+	BaseURLEnv string `json:"base_url_env,omitempty"`
+	APIKey     string `json:"api_key,omitempty"`
+	APIKeyEnv  string `json:"api_key_env,omitempty"`
+	// Model is the default generation model (e.g. dall-e-3, gpt-image-1).
+	Model string `json:"model,omitempty"`
+	// EditModel defaults to Model when empty.
+	EditModel string `json:"edit_model,omitempty"`
+	// Size default, e.g. "1024x1024". Empty lets the provider choose.
+	Size string `json:"size,omitempty"`
+	// Quality optional (provider-specific, e.g. "standard", "hd").
+	Quality string `json:"quality,omitempty"`
+	// TimeoutSec bounds a single image request (default 120, max 600).
+	TimeoutSec int `json:"timeout_sec,omitempty"`
+	// OutputDir relative to workdir for default save paths (default ".solcode/images").
+	OutputDir string `json:"output_dir,omitempty"`
 }
 
 // LSPConfig configures language-server backends for the LSP tool.
@@ -451,6 +480,7 @@ func (cfg *Config) Normalize() error {
 	cfg.MCPServers = cloneMCPServers(cfg.MCP.Servers)
 
 	cfg.LSP = normalizeLSPConfig(cfg.LSP)
+	cfg.normalizeImage()
 
 	cfg.normalizeSessionMemory()
 	ensureDefaultToolResultCompressHook(cfg)
@@ -1118,6 +1148,10 @@ func applyJSONConfig(cfg *Config, data []byte) error {
 			if err := json.Unmarshal(value, &cfg.Sandbox); err != nil {
 				return err
 			}
+		case "image":
+			if err := json.Unmarshal(value, &cfg.Image); err != nil {
+				return err
+			}
 		case "provider":
 			if err := json.Unmarshal(value, &cfg.Provider); err != nil {
 				return err
@@ -1452,6 +1486,66 @@ func (c Config) LSPIncludeDefaults() bool {
 		return true
 	}
 	return *c.LSP.IncludeDefaults
+}
+
+func (cfg *Config) normalizeImage() {
+	if cfg == nil {
+		return
+	}
+	img := &cfg.Image
+	img.BaseURLEnv = strings.TrimSpace(img.BaseURLEnv)
+	img.APIKeyEnv = strings.TrimSpace(img.APIKeyEnv)
+	if img.APIKeyEnv != "" {
+		if v := strings.TrimSpace(os.Getenv(img.APIKeyEnv)); v != "" {
+			img.APIKey = v
+		}
+	}
+	if img.BaseURLEnv != "" {
+		if v := strings.TrimSpace(os.Getenv(img.BaseURLEnv)); v != "" {
+			img.BaseURL = v
+		}
+	}
+	// Optional conventional env fallbacks when fields are empty.
+	if strings.TrimSpace(img.APIKey) == "" {
+		if v := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); v != "" {
+			img.APIKey = v
+		}
+	}
+	if strings.TrimSpace(img.BaseURL) == "" {
+		if v := strings.TrimSpace(os.Getenv("OPENAI_IMAGE_BASE_URL")); v != "" {
+			img.BaseURL = v
+		} else if v := strings.TrimSpace(os.Getenv("OPENAI_BASE_URL")); v != "" {
+			img.BaseURL = v
+		}
+	}
+	img.BaseURL = strings.TrimRight(strings.TrimSpace(img.BaseURL), "/")
+	img.APIKey = strings.TrimSpace(img.APIKey)
+	img.Model = strings.TrimSpace(img.Model)
+	img.EditModel = strings.TrimSpace(img.EditModel)
+	img.Size = strings.TrimSpace(img.Size)
+	img.Quality = strings.TrimSpace(img.Quality)
+	img.OutputDir = strings.TrimSpace(img.OutputDir)
+	if img.OutputDir == "" {
+		img.OutputDir = filepath.Join(configDirName, "images")
+	}
+	if img.TimeoutSec <= 0 {
+		img.TimeoutSec = 120
+	}
+	if img.TimeoutSec > 600 {
+		img.TimeoutSec = 600
+	}
+	if img.EditModel == "" {
+		img.EditModel = img.Model
+	}
+}
+
+// ImageEnabled reports whether OpenAI-format image tools should be registered.
+// Requires base_url + api_key after normalize; Enabled=false disables explicitly.
+func (c Config) ImageEnabled() bool {
+	if c.Image.Enabled != nil && !*c.Image.Enabled {
+		return false
+	}
+	return strings.TrimSpace(c.Image.BaseURL) != "" && strings.TrimSpace(c.Image.APIKey) != ""
 }
 
 func cleanAndExpandPaths(paths []string) []string {

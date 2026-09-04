@@ -574,15 +574,14 @@ func (s *Server) emitToolDone(sess *acpSession, name, output string, isError boo
 		status = ToolCallFailed
 	}
 	raw, _ := json.Marshal(map[string]string{"output": output})
+	toolContent, locations := toolOutputContent(name, output, isError)
 	s.emitUpdate(sess.id, SessionUpdate{
 		SessionUpdate: "tool_call_update",
 		ToolCallID:    id,
 		Status:        status,
 		RawOutput:     raw,
-		ToolContent: []ToolCallContent{{
-			Type:    "content",
-			Content: &ContentBlock{Type: "text", Text: output},
-		}},
+		ToolContent:   toolContent,
+		Locations:     locations,
 	})
 	if name == tool.TodoWriteToolName && !isError {
 		s.emitPlanUpdate(sess, input)

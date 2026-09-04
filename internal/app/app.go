@@ -88,7 +88,7 @@ type options struct {
 func buildToolState(cfg config.Config, mcpFactory mcp.ClientFactory) (*tool.Registry, *skill.Registry, *mcp.Registry, *lsp.Manager, error) {
 	registry := tool.NewRegistry()
 	lspManager := newLSPManager(cfg)
-	registerBuiltins(registry, lspManager, cfg.Sandbox)
+	registerBuiltins(registry, lspManager, cfg.Sandbox, cfg.Image, cfg.ImageEnabled())
 
 	skillRegistry := loadSkills(cfg)
 	if defs := skillRegistry.All(); len(defs) > 0 {
@@ -2830,7 +2830,7 @@ func newFileChangeRecorder(store *changegraph.Store) func(context.Context, *tool
 	}
 }
 
-func registerBuiltins(registry *tool.Registry, lspManager *lsp.Manager, sandboxPolicy sandbox.Policy) {
+func registerBuiltins(registry *tool.Registry, lspManager *lsp.Manager, sandboxPolicy sandbox.Policy, imageCfg config.ImageConfig, imageEnabled bool) {
 	tools := []tool.Tool{
 		tool.NewAskUserTool(),
 		tool.NewBashToolWithSandbox(sandboxPolicy),
@@ -2849,6 +2849,19 @@ func registerBuiltins(registry *tool.Registry, lspManager *lsp.Manager, sandboxP
 		tool.NewWaitTool(),
 		tool.NewWebSearchTool(),
 		tool.NewWriteTool(),
+	}
+	if imageEnabled {
+		api := tool.ImageAPIConfig{
+			BaseURL:    imageCfg.BaseURL,
+			APIKey:     imageCfg.APIKey,
+			Model:      imageCfg.Model,
+			EditModel:  imageCfg.EditModel,
+			Size:       imageCfg.Size,
+			Quality:    imageCfg.Quality,
+			TimeoutSec: imageCfg.TimeoutSec,
+			OutputDir:  imageCfg.OutputDir,
+		}
+		tools = append(tools, tool.NewImageGenerateTool(api), tool.NewImageEditTool(api))
 	}
 	if lspManager != nil {
 		tools = append(tools, tool.NewLSPTool(lspManager))

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/solosw/solcode/internal/config"
 	"github.com/solosw/solcode/internal/tool"
 )
 
@@ -59,5 +60,31 @@ func TestSkillRootPathsCannotEscapeRoot(t *testing.T) {
 	uctx := &tool.UseContext{WorkDir: workDir, SkillRoots: []string{skillRoot}}
 	if err := tool.CheckAllowedPath(uctx, filepath.Join(outside, "secret.md")); err == nil {
 		t.Fatal("expected external path to be rejected")
+	}
+}
+
+func TestCheckAllowedPathAllowsUserSolcodeDir(t *testing.T) {
+	workDir := t.TempDir()
+	userRoot := config.UserConfigDir()
+	if userRoot == "" {
+		t.Fatal("expected UserConfigDir to be non-empty")
+	}
+	target := filepath.Join(userRoot, "settings.local.json")
+	uctx := &tool.UseContext{WorkDir: workDir}
+	if err := tool.CheckAllowedPath(uctx, target); err != nil {
+		t.Fatalf("CheckAllowedPath() user .solcode path rejected: %v", err)
+	}
+}
+
+func TestCheckAllowedPathRejectsOutsideUserSolcode(t *testing.T) {
+	workDir := t.TempDir()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	outside := filepath.Join(home, "not-solcode-secret.txt")
+	uctx := &tool.UseContext{WorkDir: workDir}
+	if err := tool.CheckAllowedPath(uctx, outside); err == nil {
+		t.Fatal("expected path outside ~/.solcode to be rejected")
 	}
 }

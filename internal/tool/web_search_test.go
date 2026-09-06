@@ -81,6 +81,21 @@ func TestWebSearchUsesBaiduFallbackOnlyAfterTextTimeout(t *testing.T) {
 	}
 }
 
+func TestWebSearchUsesBaiduFallbackAfterBackendPanic(t *testing.T) {
+	fallback := &fakeBaiduSearcher{hits: []SearchHit{{Title: "Baidu panic fallback", URL: "https://example.cn/b", Snippet: "fallback"}}}
+	wt := newWebSearchTool(&fakeWebSearcher{err: errors.New("websearch backend panicked: runtime error: invalid memory address or nil pointer dereference")}, fallback).(*webSearchTool)
+	result, err := wt.Invoke(context.Background(), nil, json.RawMessage(`{"query":"agent skills","category":"text"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.IsError || !strings.Contains(result.Text, "Baidu panic fallback") {
+		t.Fatalf("result = %+v", result)
+	}
+	if fallback.query != "agent skills" {
+		t.Fatalf("fallback query = %q", fallback.query)
+	}
+}
+
 func TestWebSearchDoesNotUseBaiduFallbackForNonTimeoutOrNonText(t *testing.T) {
 	fallback := &fakeBaiduSearcher{hits: []SearchHit{{Title: "should not appear"}}}
 	wt := newWebSearchTool(&fakeWebSearcher{err: errors.New("backend unavailable")}, fallback).(*webSearchTool)

@@ -34,7 +34,13 @@ type webSearcher interface {
 
 type defaultWebSearcher struct{}
 
-func (defaultWebSearcher) Search(ctx context.Context, query string, opts websearch.SearchOptions) ([]websearch.SearchResult, error) {
+func (defaultWebSearcher) Search(ctx context.Context, query string, opts websearch.SearchOptions) (results []websearch.SearchResult, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			results = nil
+			err = fmt.Errorf("websearch backend panicked: %v", recovered)
+		}
+	}()
 	return websearch.Search(ctx, query, opts)
 }
 
@@ -141,7 +147,7 @@ func (t *webSearchTool) Invoke(ctx context.Context, uctx *UseContext, input json
 
 	var hits []SearchHit
 	if err != nil {
-		if category == websearch.CategoryText && isTimeoutError(err) && t.baiduFallback != nil {
+		if category == websearch.CategoryText && shouldUseBaiduFallback(err) && t.baiduFallback != nil {
 			fallbackTimeout := t.fallbackTimeout
 			if fallbackTimeout <= 0 {
 				fallbackTimeout = 10 * time.Second
@@ -150,7 +156,7 @@ func (t *webSearchTool) Invoke(ctx context.Context, uctx *UseContext, input json
 			hits, err = t.baiduFallback.Search(fallbackCtx, params.Query, maxResults)
 			fallbackCancel()
 			if err != nil {
-				return ErrorResult("web search timed out and Baidu fallback failed: " + err.Error()), nil
+				return ErrorResult("web search failed and Baidu fallback failed: " + err.Error()), nil
 			}
 		} else {
 			return ErrorResult("web search failed: " + err.Error()), nil
@@ -194,6 +200,19 @@ func isTimeoutError(err error) bool {
 	}
 	var netErr net.Error
 	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+func isWebSearchPanicError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "websearch backend panicked:")
+}
+
+// shouldUseBaiduFallback covers timeouts and known third-party backend panics
+// (for example arXiv HTML parse nil dereferences inside proiceremo/websearch).
+func shouldUseBaiduFallback(err error) bool {
+	return isTimeoutError(err) || isWebSearchPanicError(err)
 }
 
 func normalizeSearchResults(results []websearch.SearchResult, limit int) []SearchHit {

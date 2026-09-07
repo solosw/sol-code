@@ -249,6 +249,7 @@ func New(cfg config.Config, opts ...Option) (*App, error) {
 		// look up what was remembered before instead of re-deriving it.
 		registry.Register(tool.NewWriteMemoryTool(application), tool.NewReadMemoryTool(application))
 	}
+	registry.Register(tool.NewReadObservationTool(application))
 
 	return application, nil
 }
@@ -1255,6 +1256,126 @@ func (a *App) sessionSummaryWriter() session.SummaryWriter {
 	return aiSessionSummaryWriter{client: a.Client, model: memoryModelName(a.Config)}
 }
 
+func (a *App) observationStoreFor(current *session.Session) session.ObservationStore {
+	if a == nil || current == nil {
+		return nil
+	}
+	dir := strings.TrimSpace(a.Config.Session.Dir)
+	if dir == "" {
+		dir = config.DefaultSessionDir(a.Config.WorkDir)
+	}
+	if dir == "" {
+		return nil
+	}
+	return session.NewFileObservationStore(session.ObservationStoreDir(dir, current.Metadata.ID))
+}
+
+func (a *App) observationStoreForID(sessionID, workDir string) session.ObservationStore {
+	if a == nil {
+		return nil
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		id = strings.TrimSpace(a.Config.Session.DefaultSession)
+	}
+	if id == "" {
+		id = "main"
+	}
+	dir := strings.TrimSpace(a.Config.Session.Dir)
+	if dir == "" {
+		if workDir == "" {
+			workDir = a.Config.WorkDir
+		}
+		dir = config.DefaultSessionDir(workDir)
+	}
+	if dir == "" {
+		return nil
+	}
+	return session.NewFileObservationStore(session.ObservationStoreDir(dir, session.SessionID(id)))
+}
+
+func observationLookupRoot(sessionDir, workDir string) string {
+	sessionDir = strings.TrimSpace(sessionDir)
+	if sessionDir != "" {
+		return filepath.Clean(sessionDir)
+	}
+	workDir = strings.TrimSpace(workDir)
+	if workDir == "" {
+		return ""
+	}
+	return filepath.Clean(config.DefaultSessionDir(workDir))
+}
+
+func observationPathAllowed(path, sessionDir, workDir string) bool {
+	path = filepath.Clean(strings.TrimSpace(path))
+	if path == "" {
+		return false
+	}
+	if root := observationLookupRoot(sessionDir, workDir); root != "" {
+		if tool.CheckWithinWorkDir(root, path) == nil {
+			return true
+		}
+	}
+	if workDir = strings.TrimSpace(workDir); workDir != "" {
+		if tool.CheckWithinWorkDir(workDir, path) == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// ReadObservation implements tool.ObservationReader so the model can recover
+// compacted tool results from a placeholder, observation_id, or stored path.
+func (a *App) ReadObservation(_ context.Context, req tool.ObservationReadRequest) (string, error) {
+	if a == nil {
+		return "", fmt.Errorf("app is nil")
+	}
+	id, path := session.ParseObservationRef(req.Ref)
+	if strings.TrimSpace(req.ID) != "" {
+		id = strings.TrimSpace(req.ID)
+	}
+	if strings.TrimSpace(req.Path) != "" {
+		path = strings.TrimSpace(req.Path)
+	}
+	if id == "" && path == "" && strings.TrimSpace(req.Ref) != "" {
+		id = strings.TrimSpace(req.Ref)
+	}
+	if id == "" && path == "" {
+		return "", fmt.Errorf("observation reference is empty")
+	}
+
+	sessionDir := strings.TrimSpace(a.Config.Session.Dir)
+	workDir := strings.TrimSpace(req.WorkDir)
+	if workDir == "" {
+		workDir = a.Config.WorkDir
+	}
+	if sessionDir == "" {
+		sessionDir = config.DefaultSessionDir(workDir)
+	}
+
+	store := a.observationStoreForID(req.SessionID, workDir)
+	if id != "" && store != nil {
+		content, err := store.Load(id)
+		if err == nil && strings.TrimSpace(content) != "" {
+			return content, nil
+		}
+	}
+	if path != "" {
+		if !observationPathAllowed(path, sessionDir, workDir) {
+			return "", fmt.Errorf("observation path is outside the session store")
+		}
+		data, err := os.ReadFile(filepath.Clean(path))
+		if err != nil {
+			return "", fmt.Errorf("read observation path: %w", err)
+		}
+		return string(data), nil
+	}
+	if id == "" {
+		return "", fmt.Errorf("observation reference is empty")
+	}
+	return "", fmt.Errorf("observation %q not found", id)
+}
+
 func (a *App) compactSession(ctx context.Context, current *session.Session, force bool) (bool, error) {
 	if a == nil || current == nil {
 		return false, nil
@@ -1288,12 +1409,20 @@ func (a *App) compactSession(ctx context.Context, current *session.Session, forc
 	if target <= 0 {
 		target = trigger * 15 / 100
 	}
+	summaryGate := a.memorySummaryTriggerTokens()
+	if summaryGate <= 0 {
+		summaryGate = trigger
+	}
 	result, err := session.Compact(ctx, current.Summary, messagesToCompact, a.sessionSummaryWriter(), session.CompactOptions{
 		MaxRecentTurns:         a.Config.Memory.MaxRecentTurns,
 		SummaryThresholdTokens: trigger,
 		TargetTokens:           target,
 		EstimatedTokens:        estimated,
 		Force:                  force,
+		ObservationStore:       a.observationStoreFor(current),
+		// Zero uses session.defaultRecentUnmasked (newest 2 user turns).
+		ObservationKeepTurns: 0,
+		SummaryIfAboveTokens: summaryGate,
 	})
 	if err != nil {
 		a.recordCompactEvent("compact_failed", map[string]any{
@@ -1346,6 +1475,20 @@ func (a *App) compactSession(ctx context.Context, current *session.Session, forc
 		return true, nil
 	}
 	beforeMessages := len(current.Messages)
+	maskedOnly := result.Changed && strings.Contains(session.Transcript(result.Messages), session.ObservationMaskMarker) && strings.TrimSpace(result.Summary) == previousSummary
+	if maskedOnly {
+		current.ReplaceMessages(session.MergeCompactedContext(result.Messages, current.CopyMessages()))
+		a.recordCompactEvent("compact_succeeded", map[string]any{
+			"session_id":      string(current.Metadata.ID),
+			"messages_before": beforeMessages,
+			"messages_after":  len(current.Messages),
+			"method":          "observation_masking",
+			"summary_runes":   len([]rune(current.Summary)),
+			"original_runes":  len([]rune(result.OriginalTranscript)),
+			"retained_runes":  len([]rune(result.RetainedTranscript)),
+		})
+		return true, nil
+	}
 	nextSummary := strings.TrimSpace(result.Summary)
 	if force || nextSummary == "" {
 		nextSummary = conciseSessionSummary(result.OriginalTranscript, previousSummary)

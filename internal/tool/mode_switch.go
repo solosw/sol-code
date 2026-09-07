@@ -32,7 +32,7 @@ func NewModeSwitchToolWithGoal(switchMode func(ctx context.Context, mode string)
 func (t *modeSwitchTool) Name() string { return ModeSwitchToolName }
 
 func (t *modeSwitchTool) Description() string {
-	return "Request a permission-mode transition. Entering plan from another mode requires user approval. Bypass and goal are only available from plan and also require user approval. Switching to goal starts the goal.md workflow after approval."
+	return "Request a permission-mode transition. Entering plan from another mode requires user approval. Bypass and goal are only available from plan and also require user approval. Switching to goal starts the goal.md workflow after approval. Use only when the user asks for plan/bypass/goal, or when a large design should be planned before implementation; do not switch modes unprompted for ordinary coding."
 }
 
 func (t *modeSwitchTool) InputSchema() map[string]any {

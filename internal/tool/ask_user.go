@@ -72,7 +72,8 @@ or offer choices. Use this when you need user input to make decisions.
 - Users can select an option or type a custom answer
 - Use for: gathering preferences, clarifying ambiguity, making decisions
 - Each question needs 2-4 options; header labels the question briefly
-- In interactive mode, results are returned as answers map`
+- In interactive mode, results are returned as answers map
+- Do not use this to ask for facts you can discover with tools (files, tests, errors, repo layout)`
 }
 
 func (t *askUserTool) InputSchema() map[string]any {

@@ -409,11 +409,16 @@ func toolUsagePrompt() string {
 		"Tool usage:",
 		"- Use the available tools when they are the most direct way to gather information, inspect code, make changes, or verify behavior.",
 		"- Match the tool input schema exactly and prefer the smallest tool call that completes the task.",
+		"- You may call multiple independent tools in parallel in one turn (for example several View/Grep/Glob/LS/LSP reads). Do not parallelize edits that depend on each other.",
 		"- Only a compact core of tools is listed each turn. Additional MCP tools and less common builtins stay in a live registry and are not all sent as schemas.",
 		"- Treat the current tool list as incomplete. Do not assume a capability is unavailable just because it is not listed this turn.",
 		"- Call ToolSearch as soon as the task needs a capability that is not in the current list (for example web search, fetch, image generation/edit, browser/MCP servers, or a named skill). Use a short capability query, not a full sentence.",
 		"- After ToolSearch, wait for the next turn: matching tools are enabled then, and you must use the exact returned tool name. Do not invent tool names.",
 		"- Prefer ToolSearch over guessing, skipping the capability, or asking the user which hidden tool to use.",
+		"- File tools may read/write the project WorkDir and the user ~/.solcode directory. Do not try to access other home-directory paths.",
+		"- Prefer specialized tools over Bash: Glob/Grep/LS/View for files, LSP for code intelligence, WebSearch/Fetch (via ToolSearch if hidden) for the network. Bash is banned from curl/wget and similar downloaders.",
+		"- Use AskUser for real product/requirement choices (2-4 options). Do not use it for facts you can discover with tools.",
+		"- Use ModeSwitch only when the user wants plan/bypass/goal, or when a large design should be planned before edits. Do not switch modes unprompted for ordinary coding.",
 		"- When a reusable workflow matches the task, use the Skill tool before continuing with other tools. Skill names may also be found via ToolSearch.",
 	}, "\n")
 }
@@ -515,6 +520,7 @@ IMPORTANT: You must NEVER generate or guess URLs for the user unless you are con
 - After tool results, continue working until the task is complete or you are genuinely blocked on a decision only the user can make.
 - Prefer targeted edits over rewrites. Match the style, naming, and idioms of the surrounding code.
 - Only make changes directly requested. Don't add features, abstractions, error handling, or refactorings the task didn't call for.
+- For 3+ step work, keep a TodoWrite list with exactly one in_progress item and mark items completed as soon as they are done.
 
 # Working with the user
 - For minor choices (naming, formatting, sensible defaults), pick a reasonable option and note it instead of asking.

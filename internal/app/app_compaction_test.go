@@ -194,6 +194,7 @@ func TestCompactSessionFailsWhenAISummaryFails(t *testing.T) {
 	cfg := config.Default()
 	cfg.MaxContextTokens = 100
 	cfg.Memory.CompactionTriggerPercent = 1
+	cfg.Memory.SummaryTriggerPercent = 1
 	writer := &recordingSummaryWriter{err: errors.New("summary API unavailable")}
 	application := &App{Config: cfg, summaryWriter: writer}
 	current := session.NewSession("named", t.TempDir(), cfg.Model)
@@ -274,6 +275,7 @@ func TestCompactSessionPersistsExtractedMemories(t *testing.T) {
 	cfg.Memory.Enabled = true
 	cfg.Memory.CompactionTriggerPercent = 1
 	cfg.Memory.CompactionTargetPercent = 1
+	cfg.Memory.SummaryTriggerPercent = 1
 	store := memory.NewFileStore(t.TempDir())
 	extractor := &recordingMemoryExtractor{}
 	application := &App{
@@ -311,6 +313,7 @@ func TestCompactSessionUsesAISummaryWriter(t *testing.T) {
 	cfg.MaxContextTokens = 100
 	cfg.Memory.CompactionTriggerPercent = 1
 	cfg.Memory.CompactionTargetPercent = 1
+	cfg.Memory.SummaryTriggerPercent = 1
 	writer := &recordingSummaryWriter{}
 	application := &App{Config: cfg, summaryWriter: writer}
 	current := session.NewSession("named", t.TempDir(), cfg.Model)
@@ -335,6 +338,46 @@ func TestCompactSessionUsesAISummaryWriter(t *testing.T) {
 	}
 	if current.Summary != "AI-generated session summary" {
 		t.Fatalf("summary = %q, want AI-generated summary", current.Summary)
+	}
+}
+
+func TestCompactSessionSkipsAISummaryWhenMaskedHistoryIsUnder50Percent(t *testing.T) {
+	cfg := config.Default()
+	cfg.MaxContextTokens = 10_000
+	cfg.Memory.CompactionTriggerPercent = 1
+	cfg.Memory.SummaryTriggerPercent = 50
+	cfg.Session.Dir = t.TempDir()
+	writer := &recordingSummaryWriter{}
+	application := &App{Config: cfg, summaryWriter: writer}
+	current := session.NewSession("named", t.TempDir(), cfg.Model)
+	oldOutput := strings.Repeat("fetch output ", 400)
+	current.Append(
+		sdk.NewUserMessage(sdk.NewTextBlock("oldest user")),
+		sdk.NewAssistantMessage(sdk.NewToolUseBlock("toolu_old", map[string]any{"url": "https://example.com"}, "Fetch")),
+		sdk.NewUserMessage(sdk.NewToolResultBlock("toolu_old", oldOutput, false)),
+		sdk.NewAssistantMessage(sdk.NewTextBlock("old reasoning")),
+		sdk.NewUserMessage(sdk.NewTextBlock("middle user")),
+		sdk.NewAssistantMessage(sdk.NewTextBlock("middle assistant")),
+		sdk.NewUserMessage(sdk.NewTextBlock("recent user")),
+		sdk.NewAssistantMessage(sdk.NewTextBlock("recent assistant")),
+	)
+
+	changed, err := application.compactSession(context.Background(), current, false)
+	if err != nil {
+		t.Fatalf("compactSession() = %v", err)
+	}
+	if !changed {
+		t.Fatal("expected observation masking to change the session")
+	}
+	if writer.called {
+		t.Fatal("LLM summary should stay skipped when masked history is under 50%")
+	}
+	got := session.Transcript(current.CopyMessages())
+	if !strings.Contains(got, session.ObservationMaskMarker) {
+		t.Fatalf("expected masked observation to remain in session history, got %q", got)
+	}
+	if !strings.Contains(got, "old reasoning") {
+		t.Fatal("expected reasoning to remain after observation masking")
 	}
 }
 

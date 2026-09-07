@@ -20,7 +20,7 @@ func NewLSPTool(manager *lsp.Manager) Tool {
 func (t *lspTool) Name() string { return "LSP" }
 
 func (t *lspTool) Description() string {
-	return "Provides read-only Language Server Protocol operations such as document symbols, workspace symbols, go to definition, find references, hover, and go to implementation."
+	return "Provides read-only Language Server Protocol operations such as document symbols, workspace symbols, go to definition, find references, hover, and go to implementation. Prefer LSP over Grep when you already have a file path and need a symbol, type, definition, or references."
 }
 
 func (t *lspTool) InputSchema() map[string]any {

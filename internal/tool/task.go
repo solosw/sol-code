@@ -52,7 +52,8 @@ func NewTaskTool(coordinator *agent.Coordinator) Tool {
 func (t *taskTool) Name() string { return TaskToolName }
 func (t *taskTool) Description() string {
 	return `Launches one or more sub-agents to complete independent or dependent tasks and returns their results.
-Use a single prompt for one bounded task, or pass tasks with dependency edges. Independent tasks run in parallel; dependency chains run serially by level. Set difficulty=easy or model=fast to use the configured fast model when available.`
+Use a single prompt for one bounded task, or pass tasks with dependency edges. Independent tasks run in parallel; dependency chains run serially by level. Set difficulty=easy or model=fast to use the configured fast model when available.
+Give each sub-agent a self-contained prompt with paths, constraints, and the expected return. Do not use Task for a single cheap file read you can do with View/Grep.`
 }
 func (t *taskTool) InputSchema() map[string]any {
 	taskSchema := map[string]any{

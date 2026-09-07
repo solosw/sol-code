@@ -434,6 +434,18 @@ func StripCompactedContextMessages(messages []sdk.MessageParam) []sdk.MessagePar
 	return out
 }
 
+// MergeCompactedContext keeps existing durable compacted summary/knowledge
+// messages and appends the newly compacted conversation history after them.
+func MergeCompactedContext(compacted, previous []sdk.MessageParam) []sdk.MessageParam {
+	prefix := make([]sdk.MessageParam, 0, 2)
+	for _, message := range previous {
+		if IsCompactedSummaryMessage(message) || IsCompactedProjectKnowledgeMessage(message) {
+			prefix = append(prefix, message)
+		}
+	}
+	return append(prefix, compacted...)
+}
+
 type NotFoundError struct {
 	ID SessionID
 }

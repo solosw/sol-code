@@ -23,6 +23,18 @@ type CompactOptions struct {
 	// Force compacts non-empty history even when it is below the automatic
 	// threshold. It is used by an explicit user /compact command.
 	Force bool
+	// ObservationStore persists masked tool results so placeholders remain
+	// retrievable. Nil still masks in-place without offloading.
+	ObservationStore ObservationStore
+	// ObservationKeepTurns leaves the newest N user turns unmasked.
+	ObservationKeepTurns int
+	// ObservationMinChars only masks tool results at least this long.
+	ObservationMinChars int
+	// SummaryIfAboveTokens runs LLM summary only after observation masking
+	// still leaves the working transcript above this size. Zero still
+	// summarizes when a writer is provided, unless masking already brought
+	// the history under SummaryThresholdTokens.
+	SummaryIfAboveTokens int
 }
 
 type CompactResult struct {
@@ -74,11 +86,36 @@ func Compact(ctx context.Context, summary string, messages []sdk.MessageParam, w
 	if strings.TrimSpace(originalTranscript) == "" {
 		return result, nil
 	}
+
+	masked, err := MaskObservations(working, opts.ObservationStore, ObservationMaskOptions{
+		RecentUnmaskedTurns: opts.ObservationKeepTurns,
+		MinChars:            opts.ObservationMinChars,
+	})
+	if err != nil {
+		return result, fmt.Errorf("mask observations: %w", err)
+	}
+	if masked.Changed {
+		working = masked.Messages
+		result.Messages = append([]sdk.MessageParam(nil), working...)
+		result.Changed = true
+	}
+
+	maskedTokens := ApproxTokensFromMessages(working)
+	needSummary := false
 	if writer != nil {
+		if opts.SummaryIfAboveTokens > 0 {
+			needSummary = maskedTokens > opts.SummaryIfAboveTokens
+		} else {
+			// Callers that omit the gate still skip LLM summary when
+			// masking already brought the history under the compact trigger.
+			needSummary = maskedTokens >= threshold
+		}
+	}
+	if writer != nil && needSummary {
 		// Summary generation is intentionally delegated to the model. Headroom
 		// still handles message compaction, while the model preserves intent,
 		// decisions, file changes, and unresolved work in natural language.
-		generated, err := writer.Summarize(ctx, summary, originalTranscript)
+		generated, err := writer.Summarize(ctx, summary, Transcript(working))
 		if err != nil {
 			return result, fmt.Errorf("generate session summary with AI: %w", err)
 		}
@@ -86,6 +123,11 @@ func Compact(ctx context.Context, summary string, messages []sdk.MessageParam, w
 		if result.Summary == "" {
 			return result, fmt.Errorf("generate session summary with AI: empty response")
 		}
+	} else if result.Changed && !needSummary {
+		result.OriginalTranscript = originalTranscript
+		result.CompactedTranscript = Transcript(working)
+		result.RetainedTranscript = result.CompactedTranscript
+		return result, nil
 	}
 	compressedMessages, err := compressMessagesWithHeadroom(working, target)
 	if err != nil {

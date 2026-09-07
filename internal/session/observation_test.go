@@ -54,9 +54,12 @@ func TestMaskObservationsStoresAndRetrievesOriginal(t *testing.T) {
 		t.Fatalf("recent observation should stay: %q", recentText)
 	}
 
-	id, path := ParseObservationRef(oldText)
-	if id == "" || path == "" {
-		t.Fatalf("expected retrievable ref in %q", oldText)
+	if strings.Contains(oldText, "preview=") || strings.Contains(oldText, "path=") || strings.Contains(oldText, "\n") {
+		t.Fatalf("placeholder should be a short id marker, got %q", oldText)
+	}
+	id, _ := ParseObservationRef(oldText)
+	if id == "" {
+		t.Fatalf("expected observation_id in %q", oldText)
 	}
 	loaded, err := store.Load(id)
 	if err != nil {
@@ -65,7 +68,7 @@ func TestMaskObservationsStoresAndRetrievesOriginal(t *testing.T) {
 	if loaded != strings.TrimSpace(oldOutput) {
 		t.Fatalf("loaded observation mismatch")
 	}
-	disk, err := os.ReadFile(path)
+	disk, err := os.ReadFile(filepath.Join(dir, id+".txt"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,6 +220,21 @@ func TestCompactUsesLLMSummaryWhenMaskingLeavesHistoryAboveGate(t *testing.T) {
 	}
 	if result.Summary != "llm summary" {
 		t.Fatalf("summary = %q", result.Summary)
+	}
+}
+
+func TestParseObservationRefFromShortPlaceholder(t *testing.T) {
+	id, path := ParseObservationRef("[observation-masked] tool=View observation_id=call-abc-123")
+	if id != "call-abc-123" {
+		t.Fatalf("id = %q", id)
+	}
+	if path != "" {
+		t.Fatalf("path = %q, want empty", path)
+	}
+
+	id, path = ParseObservationRef("[observation-masked]\ntool=View tool_use_id=call-old observation_id=legacy-id\npath=/tmp/obs.txt")
+	if id != "legacy-id" || path != "/tmp/obs.txt" {
+		t.Fatalf("legacy parse id=%q path=%q", id, path)
 	}
 }
 

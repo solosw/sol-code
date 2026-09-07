@@ -20,7 +20,7 @@ func TestAppReadObservationFromPlaceholder(t *testing.T) {
 	if _, err := store.Save(id, "original fetch body"); err != nil {
 		t.Fatal(err)
 	}
-	placeholder := "[observation-masked]\ntool=Fetch tool_use_id=toolu_old observation_id=" + id + "\npath=" + filepath.Join(store.Dir, id+".txt")
+	placeholder := "[observation-masked] tool=Fetch observation_id=" + id
 
 	got, err := application.ReadObservation(context.Background(), tool.ObservationReadRequest{
 		Ref:       placeholder,
@@ -31,6 +31,17 @@ func TestAppReadObservationFromPlaceholder(t *testing.T) {
 	}
 	if got != "original fetch body" {
 		t.Fatalf("got %q", got)
+	}
+
+	got, err = application.ReadObservation(context.Background(), tool.ObservationReadRequest{
+		ID:        id,
+		SessionID: "main",
+	})
+	if err != nil {
+		t.Fatalf("ReadObservation(id) = %v", err)
+	}
+	if got != "original fetch body" {
+		t.Fatalf("id lookup got %q", got)
 	}
 }
 

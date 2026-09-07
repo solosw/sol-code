@@ -39,7 +39,7 @@ func invokeReadObservation(t *testing.T, reader tool.ObservationReader, params m
 
 func TestReadObservationToolReturnsOriginal(t *testing.T) {
 	reader := &fakeObservationReader{result: "full fetch body"}
-	placeholder := "[observation-masked]\ntool=Fetch observation_id=toolu_old-abc path=/tmp/obs.txt"
+	placeholder := "[observation-masked] tool=Fetch observation_id=toolu_old-abc"
 	result := invokeReadObservation(t, reader, map[string]any{"ref": placeholder})
 	if result.IsError {
 		t.Fatalf("unexpected error result: %s", result.Text)

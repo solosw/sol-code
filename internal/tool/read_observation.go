@@ -46,9 +46,8 @@ func (t *readObservationTool) Description() string {
 	return `Retrieve the original payload of a compacted tool result.
 
 Use this when history contains [observation-masked] placeholders and you need
-the full observation. Pass the placeholder text as ref, or the observation_id /
-path fields printed in that placeholder. Do not guess filenames; copy the
-values from the masked tool result.`
+the full observation. Pass observation_id from the placeholder. Do not guess
+filenames or reconstruct the original tool output.`
 }
 
 func (t *readObservationTool) InputSchema() map[string]any {
@@ -61,11 +60,11 @@ func (t *readObservationTool) InputSchema() map[string]any {
 			},
 			"observation_id": map[string]any{
 				"type":        "string",
-				"description": "Stored observation_id from the placeholder.",
+				"description": "observation_id from the placeholder. Preferred over reconstructing the original output.",
 			},
 			"path": map[string]any{
 				"type":        "string",
-				"description": "Stored path= value from the placeholder.",
+				"description": "Optional stored path, if present in an older placeholder.",
 			},
 		},
 	}

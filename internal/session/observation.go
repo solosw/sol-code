@@ -16,8 +16,7 @@ const (
 	ObservationMaskMarker      = "[observation-masked]"
 	defaultRecentUnmasked      = 2
 	defaultMaskMinChars        = 400
-	observationStoreDirName    = "observations"
-	maxObservationPreviewRunes = 160
+	observationStoreDirName = "observations"
 )
 
 // ObservationStore persists masked tool observations so later turns can
@@ -148,15 +147,12 @@ func maskToolResultBlock(block sdk.ContentBlockParamUnion, store ObservationStor
 	}
 	original := strings.TrimSpace(observationContent(block.OfToolResult))
 	id := observationID(block.OfToolResult.ToolUseID, original)
-	path := ""
 	if store != nil {
-		saved, err := store.Save(id, original)
-		if err != nil {
+		if _, err := store.Save(id, original); err != nil {
 			return block, false, err
 		}
-		path = saved
 	}
-	placeholder := formatObservationPlaceholder(toolName, block.OfToolResult.ToolUseID, id, path, original)
+	placeholder := formatObservationPlaceholder(toolName, id)
 	toolResult := *block.OfToolResult
 	toolResult.Content = []sdk.ToolResultBlockParamContentUnion{
 		{OfText: &sdk.TextBlockParam{Text: placeholder}},
@@ -165,30 +161,11 @@ func maskToolResultBlock(block sdk.ContentBlockParamUnion, store ObservationStor
 	return block, true, nil
 }
 
-func formatObservationPlaceholder(toolName, toolUseID, id, path, original string) string {
+func formatObservationPlaceholder(toolName, id string) string {
 	if strings.TrimSpace(toolName) == "" {
 		toolName = "tool"
 	}
-	preview := observationPreview(original)
-	lines := []string{
-		ObservationMaskMarker,
-		fmt.Sprintf("tool=%s tool_use_id=%s observation_id=%s", toolName, strings.TrimSpace(toolUseID), id),
-		fmt.Sprintf("chars=%d preview=%s", utf8.RuneCountInString(original), preview),
-	}
-	if path != "" {
-		lines = append(lines, "path="+path)
-	}
-	lines = append(lines, "Retrieve the original observation by observation_id or path if needed.")
-	return strings.Join(lines, "\n")
-}
-
-func observationPreview(text string) string {
-	text = strings.Join(strings.Fields(text), " ")
-	runes := []rune(text)
-	if len(runes) <= maxObservationPreviewRunes {
-		return text
-	}
-	return string(runes[:maxObservationPreviewRunes]) + "..."
+	return fmt.Sprintf("%s tool=%s observation_id=%s", ObservationMaskMarker, toolName, id)
 }
 
 func observationID(toolUseID, content string) string {

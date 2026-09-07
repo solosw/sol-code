@@ -30,6 +30,8 @@ func TestContextBuilderSystemPromptIsStable(t *testing.T) {
 		"user system",
 		"You are solcode, an interactive agent that helps users with software engineering tasks.",
 		"Tool usage:",
+		"Call ToolSearch as soon as the task needs a capability that is not in the current list",
+		"Treat the current tool list as incomplete",
 		"Skills:",
 		"Agent Skills packages",
 		"review: Code review",

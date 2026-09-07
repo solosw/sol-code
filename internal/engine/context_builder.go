@@ -410,7 +410,10 @@ func toolUsagePrompt() string {
 		"- Use the available tools when they are the most direct way to gather information, inspect code, make changes, or verify behavior.",
 		"- Match the tool input schema exactly and prefer the smallest tool call that completes the task.",
 		"- Only a compact core of tools is listed each turn. Additional MCP tools and less common builtins stay in a live registry and are not all sent as schemas.",
-		"- When you need a capability that is not currently listed, call ToolSearch with a short capability query. Matching tools are enabled on the next turn.",
+		"- Treat the current tool list as incomplete. Do not assume a capability is unavailable just because it is not listed this turn.",
+		"- Call ToolSearch as soon as the task needs a capability that is not in the current list (for example web search, fetch, image generation/edit, browser/MCP servers, or a named skill). Use a short capability query, not a full sentence.",
+		"- After ToolSearch, wait for the next turn: matching tools are enabled then, and you must use the exact returned tool name. Do not invent tool names.",
+		"- Prefer ToolSearch over guessing, skipping the capability, or asking the user which hidden tool to use.",
 		"- When a reusable workflow matches the task, use the Skill tool before continuing with other tools. Skill names may also be found via ToolSearch.",
 	}, "\n")
 }

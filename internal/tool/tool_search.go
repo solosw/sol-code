@@ -29,7 +29,7 @@ func NewToolSearchTool(registry *Registry, skills *skill.Registry) Tool {
 func (t *toolSearchTool) Name() string { return ToolSearchToolName }
 
 func (t *toolSearchTool) Description() string {
-	return "Search the currently available built-in tools, MCP tools, and skills by capability. Use this before a task needs a tool not currently visible. Matching tools are enabled on the following turn."
+	return "Search the currently available built-in tools, MCP tools, and skills by capability. The current tool list is incomplete: MCP tools and less common builtins are hidden until discovered. Call this as soon as a needed capability is not listed (web, fetch, images, browser, extra MCP servers, named skills). Matching tools are enabled on the following turn; then call the exact returned name. Do not invent tool names."
 }
 
 func (t *toolSearchTool) InputSchema() map[string]any {
